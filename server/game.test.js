@@ -24,6 +24,7 @@ test("at least five long dynamic circuits are available with preview and boost z
   assert.ok(CIRCUITS.every((circuit) => circuit.points.length >= 180));
   assert.ok(CIRCUITS.every((circuit) => circuit.length > 5200));
   assert.ok(CIRCUITS.every((circuit) => circuit.boostZones.length >= 5));
+  assert.ok(CIRCUITS.every((circuit) => circuit.boostZones.every((zone) => zone.zoneWidth < circuit.width * 0.6)));
 });
 
 test("new rooms start without AI cars and remember the selected circuit", () => {
@@ -148,7 +149,7 @@ test("driving backward across the start line does not add laps", () => {
   assert.equal(joined.lap, 0);
 });
 
-test("boost zones make a car much faster for a few seconds", () => {
+test("boost zones only trigger on a partial-width patch, not the whole track", () => {
   const state = createInitialState({ circuitId: "monza" });
   const car = addHumanPlayer(state, "socket-a", "민수").car;
   setPlayerReady(state, "socket-a", true);
@@ -159,12 +160,22 @@ test("boost zones make a car much faster for a few seconds", () => {
   const boostIndex = (boost.startIndex + 2) % state.circuit.points.length;
   const point = state.circuit.points[boostIndex];
   const next = state.circuit.points[(boostIndex + 1) % state.circuit.points.length];
-  car.x = point.x;
-  car.y = point.y;
   car.angle = Math.atan2(next.y - point.y, next.x - point.x);
   car.trackPosition = boostIndex;
   car.speed = 440;
+
+  const normal = car.angle + Math.PI / 2;
+  car.x = point.x - Math.cos(normal) * boost.sideOffset;
+  car.y = point.y - Math.sin(normal) * boost.sideOffset;
   applyPlayerInput(state, "socket-a", { throttle: true });
+  updateGame(state, 100);
+
+  assert.equal(car.boostUntil, 0);
+
+  car.x = point.x + Math.cos(normal) * boost.sideOffset;
+  car.y = point.y + Math.sin(normal) * boost.sideOffset;
+  car.trackPosition = boostIndex;
+  car.speed = 440;
   updateGame(state, 100);
 
   assert.ok(car.boostUntil > state.timeMs);

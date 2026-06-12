@@ -345,18 +345,35 @@ function buildCircuit(definition) {
     points.push({ x: WORLD_WIDTH / 2 + rotated.x, y: WORLD_HEIGHT / 2 + rotated.y });
   }
 
+  const smoothedPoints = smoothClosedPoints(points, 2);
+
   const circuit = {
     ...definition,
     worldWidth: WORLD_WIDTH,
     worldHeight: WORLD_HEIGHT,
     centerX: WORLD_WIDTH / 2,
     centerY: WORLD_HEIGHT / 2,
-    points,
-    checkpoints: buildCheckpoints(points),
-    boostZones: buildBoostZones(points)
+    points: smoothedPoints,
+    checkpoints: buildCheckpoints(smoothedPoints),
+    boostZones: buildBoostZones(smoothedPoints)
   };
-  circuit.length = calculateCircuitLength(points);
+  circuit.length = calculateCircuitLength(smoothedPoints);
   return circuit;
+}
+
+function smoothClosedPoints(points, passes) {
+  let current = points;
+  for (let pass = 0; pass < passes; pass += 1) {
+    current = current.map((point, index) => {
+      const previous = current[(index - 1 + current.length) % current.length];
+      const next = current[(index + 1) % current.length];
+      return {
+        x: point.x * 0.52 + (previous.x + next.x) * 0.24,
+        y: point.y * 0.52 + (previous.y + next.y) * 0.24
+      };
+    });
+  }
+  return current;
 }
 
 function buildCheckpoints(points) {
@@ -372,7 +389,8 @@ function buildBoostZones(points) {
   return starts.map((start, index) => {
     const startIndex = Math.floor(points.length * start);
     const endIndex = (startIndex + length) % points.length;
-    return { id: `boost-${index + 1}`, startIndex, endIndex, length };
+    const sideOffset = index % 2 === 0 ? 34 : -34;
+    return { id: `boost-${index + 1}`, startIndex, endIndex, length, sideOffset, zoneWidth: 34 };
   });
 }
 
@@ -534,7 +552,7 @@ function updateProgress(car, state) {
 
 function applyBoostZone(car, state) {
   if (car.speed <= 0) return;
-  if (isInsideBoostZone(state.circuit, car.trackPosition)) {
+  if (isInsideBoostZone(state.circuit, car)) {
     if (car.boostUntil <= state.timeMs) {
       car.speed = Math.max(car.speed, 560);
     }
@@ -542,12 +560,27 @@ function applyBoostZone(car, state) {
   }
 }
 
-function isInsideBoostZone(circuit, trackPosition) {
-  const normalized = ((trackPosition % circuit.points.length) + circuit.points.length) % circuit.points.length;
+function isInsideBoostZone(circuit, car) {
+  const normalized = ((car.trackPosition % circuit.points.length) + circuit.points.length) % circuit.points.length;
   return circuit.boostZones.some((zone) => {
-    if (zone.startIndex <= zone.endIndex) return normalized >= zone.startIndex && normalized <= zone.endIndex;
-    return normalized >= zone.startIndex || normalized <= zone.endIndex;
+    const longitudinalMatch =
+      zone.startIndex <= zone.endIndex
+        ? normalized >= zone.startIndex && normalized <= zone.endIndex
+        : normalized >= zone.startIndex || normalized <= zone.endIndex;
+    if (!longitudinalMatch) return false;
+    const lateralOffset = getLateralOffset(circuit, car);
+    return Math.abs(lateralOffset - zone.sideOffset) <= zone.zoneWidth / 2 + CAR_RADIUS * 0.35;
   });
+}
+
+function getLateralOffset(circuit, car) {
+  const index = Math.floor(car.trackPosition) % circuit.points.length;
+  const point = circuit.points[index];
+  const next = circuit.points[(index + 1) % circuit.points.length];
+  const tangent = Math.atan2(next.y - point.y, next.x - point.x);
+  const normalX = Math.cos(tangent + Math.PI / 2);
+  const normalY = Math.sin(tangent + Math.PI / 2);
+  return (car.x - point.x) * normalX + (car.y - point.y) * normalY;
 }
 
 function separateCars(state) {

@@ -88,21 +88,22 @@ label {
 .menu-panel {
   align-items: center;
   background:
-    linear-gradient(90deg, rgba(4, 8, 10, 0.9), rgba(4, 8, 10, 0.58)),
+    linear-gradient(90deg, rgba(4, 8, 10, 0.88), rgba(4, 8, 10, 0.5)),
     transparent;
   display: flex;
   inset: 0;
   justify-content: center;
-  padding: 28px;
+  padding: 24px;
   position: absolute;
   z-index: 5;
 }
 
 .menu-grid {
   display: grid;
-  gap: 24px;
-  grid-template-columns: minmax(280px, 420px) minmax(340px, 620px);
-  width: min(100%, 1080px);
+  gap: 18px;
+  grid-template-columns: minmax(300px, 430px) minmax(360px, 600px);
+  max-height: calc(100vh - 48px);
+  width: min(100%, 1048px);
 }
 
 .help-text {
@@ -126,6 +127,8 @@ label {
 
 .menu-main,
 .room-browser {
+  max-height: calc(100vh - 48px);
+  overflow: auto;
   padding: 18px;
 }
 
@@ -139,9 +142,11 @@ label {
 }
 
 h1 {
-  font-size: clamp(2.8rem, 7vw, 5.6rem);
-  line-height: 0.92;
-  margin: 0 0 20px;
+  font-size: clamp(2.6rem, 4.9vw, 4.6rem);
+  line-height: 0.96;
+  margin: 0 0 18px;
+  white-space: nowrap;
+  word-break: keep-all;
 }
 
 h2 {
@@ -212,11 +217,13 @@ h2 {
 .room-panel {
   display: grid;
   gap: 12px;
+  bottom: 18px;
   left: 18px;
+  max-height: min(45vh, 360px);
+  overflow: hidden;
   padding: 12px;
   position: absolute;
-  top: 112px;
-  width: min(360px, calc(100vw - 36px));
+  width: min(330px, calc(100vw - 36px));
   z-index: 3;
 }
 
@@ -271,21 +278,31 @@ h2 {
 
 .hud,
 .leaderboard {
+  display: none;
   position: absolute;
   z-index: 2;
 }
 
+body.in-room .hud {
+  display: grid;
+}
+
+body.in-room .leaderboard {
+  display: block;
+}
+
 .hud {
   display: grid;
-  gap: 12px;
-  grid-template-columns: repeat(4, minmax(62px, 1fr));
-  left: 18px;
-  padding: 12px;
-  top: 18px;
+  gap: 10px;
+  grid-template-columns: repeat(4, minmax(58px, 1fr));
+  left: 50%;
+  padding: 9px 12px;
+  top: 12px;
+  transform: translateX(-50%);
 }
 
 .hud div {
-  min-width: 62px;
+  min-width: 58px;
 }
 
 .hud span {
@@ -297,17 +314,17 @@ h2 {
 
 .hud strong {
   display: block;
-  font-size: 1.35rem;
+  font-size: 1.18rem;
   line-height: 1.1;
 }
 
 .leaderboard {
   max-height: calc(100vh - 36px);
   overflow: hidden;
-  padding: 12px;
-  right: 18px;
-  top: 18px;
-  width: min(260px, calc(100vw - 36px));
+  padding: 10px;
+  right: 14px;
+  top: 14px;
+  width: min(220px, calc(100vw - 36px));
 }
 
 .leaderboard-header {
@@ -327,8 +344,8 @@ ol {
 .leaderboard li,
 .results li {
   color: #dce8ee;
-  font-size: 0.9rem;
-  margin: 7px 0;
+  font-size: 0.84rem;
+  margin: 6px 0;
 }
 
 .leaderboard li.local {
@@ -376,6 +393,30 @@ ol {
   display: none !important;
 }
 
+body.race-active .room-panel {
+  gap: 8px;
+  max-height: 116px;
+  opacity: 0.88;
+  width: min(300px, calc(100vw - 36px));
+}
+
+body.race-active .participant-list {
+  display: none;
+}
+
+body.race-active .room-actions {
+  grid-template-columns: 1fr;
+}
+
+body.race-active .room-actions button:not(#leaveButton) {
+  display: none;
+}
+
+body:not(.in-room) .hud,
+body:not(.in-room) .leaderboard {
+  display: none;
+}
+
 @media (max-width: 900px) {
   .menu-panel {
     align-items: flex-start;
@@ -384,6 +425,11 @@ ol {
 
   .menu-grid {
     grid-template-columns: 1fr;
+  }
+
+  h1 {
+    font-size: clamp(2.4rem, 13vw, 4rem);
+    white-space: normal;
   }
 
   .hud {

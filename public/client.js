@@ -98,6 +98,7 @@ socket.on("disconnect", () => {
   joined = false;
   menuPanel.classList.remove("hidden");
   roomPanel.classList.add("hidden");
+  syncShellState();
 });
 
 socket.on("serverInfo", (info) => {
@@ -117,6 +118,7 @@ socket.on("joined", (payload) => {
   menuPanel.classList.add("hidden");
   roomPanel.classList.remove("hidden");
   resultsPanel.classList.add("hidden");
+  syncShellState();
   canvas.focus();
 });
 
@@ -132,6 +134,7 @@ socket.on("snapshot", (nextSnapshot) => {
   updateHud();
   updateRoomPanel();
   updateCountdown();
+  syncShellState();
 });
 
 socket.on("roomError", (payload) => {
@@ -146,6 +149,7 @@ socket.on("kicked", (payload) => {
   roomPanel.classList.add("hidden");
   resultsPanel.classList.add("hidden");
   connectionStatus.textContent = payload.message;
+  syncShellState();
 });
 
 function renderCircuitOptions() {
@@ -293,7 +297,16 @@ function leaveRoom() {
   menuPanel.classList.remove("hidden");
   roomPanel.classList.add("hidden");
   resultsPanel.classList.add("hidden");
+  syncShellState();
   socket.emit("listRooms");
+}
+
+function syncShellState() {
+  document.body.classList.toggle("in-room", joined);
+  document.body.classList.toggle(
+    "race-active",
+    joined && (snapshot?.race.status === "countdown" || snapshot?.race.status === "running")
+  );
 }
 
 function sendInputIfChanged() {
@@ -375,7 +388,10 @@ function drawWorld() {
 function getWorldTransform(circuit) {
   const width = circuit?.worldWidth || 2600;
   const height = circuit?.worldHeight || 1700;
-  const scale = Math.min(canvas.width / width, canvas.height / height);
+  const padding = snapshot ? 92 : 64;
+  const availableWidth = Math.max(1, canvas.width - padding * 2);
+  const availableHeight = Math.max(1, canvas.height - padding * 2);
+  const scale = Math.min(availableWidth / width, availableHeight / height);
   return {
     scale,
     offsetX: (canvas.width - width * scale) / 2,
@@ -418,27 +434,39 @@ function drawTrackLine(points, width, color, dash) {
 
 function drawBoostZones(circuit) {
   for (const zone of circuit.boostZones || []) {
-    drawTrackSegment(circuit.points, zone.startIndex, zone.length, circuit.width * 0.72, "#39f5ff");
-    drawTrackSegment(circuit.points, zone.startIndex, zone.length, 9, "#fff06a");
+    drawBoostPatch(circuit.points, zone, "#39f5ff", zone.zoneWidth);
+    drawBoostPatch(circuit.points, zone, "#fff06a", 7);
   }
 }
 
-function drawTrackSegment(points, startIndex, length, width, color) {
+function drawBoostPatch(points, zone, color, width) {
   context.save();
   context.strokeStyle = color;
   context.lineWidth = width;
   context.lineCap = "round";
   context.lineJoin = "round";
-  context.globalAlpha = width > 20 ? 0.45 : 0.95;
+  context.globalAlpha = width > 10 ? 0.85 : 1;
   context.beginPath();
-  const first = points[startIndex % points.length];
+  const first = offsetTrackPoint(points, zone.startIndex, zone.sideOffset);
   context.moveTo(first.x, first.y);
-  for (let step = 1; step <= length; step += 1) {
-    const point = points[(startIndex + step) % points.length];
+  for (let step = 1; step <= zone.length; step += 1) {
+    const point = offsetTrackPoint(points, zone.startIndex + step, zone.sideOffset);
     context.lineTo(point.x, point.y);
   }
   context.stroke();
   context.restore();
+}
+
+function offsetTrackPoint(points, rawIndex, offset) {
+  const index = ((rawIndex % points.length) + points.length) % points.length;
+  const point = points[index];
+  const next = points[(index + 1) % points.length];
+  const tangent = Math.atan2(next.y - point.y, next.x - point.x);
+  const normal = tangent + Math.PI / 2;
+  return {
+    x: point.x + Math.cos(normal) * offset,
+    y: point.y + Math.sin(normal) * offset
+  };
 }
 
 function drawCheckpoints(circuit) {
