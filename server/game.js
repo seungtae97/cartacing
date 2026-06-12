@@ -2,18 +2,21 @@ export const MAX_PARTICIPANTS = 12;
 export const TOTAL_LAPS = 3;
 export const TICK_RATE = 30;
 
-const WORLD_WIDTH = 2000;
-const WORLD_HEIGHT = 1300;
-const POINT_COUNT = 96;
+const WORLD_WIDTH = 2600;
+const WORLD_HEIGHT = 1700;
+const POINT_COUNT = 192;
 const CAR_RADIUS = 18;
-const MAX_FORWARD_SPEED = 450;
+const NORMAL_MAX_FORWARD_SPEED = 450;
+const BOOST_MAX_FORWARD_SPEED = 780;
 const MAX_REVERSE_SPEED = -150;
-const ACCELERATION = 320;
+const NORMAL_ACCELERATION = 320;
+const BOOST_ACCELERATION = 900;
 const BRAKE_FORCE = 430;
 const FRICTION = 0.986;
 const TURN_RATE = 3.35;
 const COUNTDOWN_MS = 4000;
 const RESPAWN_LOCK_MS = 2000;
+const BOOST_DURATION_MS = 2600;
 
 const INPUT_DEFAULTS = Object.freeze({
   throttle: false,
@@ -42,61 +45,73 @@ const CIRCUIT_DEFS = [
     id: "monaco",
     name: "모나코",
     country: "모나코",
-    width: 118,
-    baseRadiusX: 610,
-    baseRadiusY: 385,
-    harmonics: [[2, 0.13, 0.4], [3, -0.09, 1.9], [5, 0.06, -0.7]],
+    width: 124,
+    baseRadiusX: 890,
+    baseRadiusY: 560,
+    harmonics: [[2, 0.18, 0.4], [3, -0.13, 1.9], [5, 0.1, -0.7], [9, 0.045, 2.4]],
+    wobbleX: [[4, 110, 0.5], [7, 64, 1.8]],
+    wobbleY: [[3, 80, -0.8], [8, 58, 0.2]],
     rotation: -0.42
   },
   {
     id: "silverstone",
     name: "실버스톤",
     country: "영국",
-    width: 140,
-    baseRadiusX: 700,
-    baseRadiusY: 360,
-    harmonics: [[2, -0.08, 0.1], [4, 0.12, 1.2], [6, -0.04, 2.6]],
+    width: 146,
+    baseRadiusX: 970,
+    baseRadiusY: 515,
+    harmonics: [[2, -0.09, 0.1], [4, 0.16, 1.2], [6, -0.06, 2.6], [10, 0.035, -0.4]],
+    wobbleX: [[3, 88, -1.2], [8, 72, 0.8]],
+    wobbleY: [[5, 92, 0.3], [9, 45, 2.1]],
     rotation: 0.16
   },
   {
     id: "suzuka",
     name: "스즈카",
     country: "일본",
-    width: 128,
+    width: 136,
     figureEight: true,
-    baseRadiusX: 640,
-    baseRadiusY: 340,
-    harmonics: [[2, 0.16, 0.7], [3, 0.08, -1.1], [5, -0.05, 2.3]],
+    baseRadiusX: 900,
+    baseRadiusY: 500,
+    harmonics: [[2, 0.2, 0.7], [3, 0.1, -1.1], [5, -0.08, 2.3], [11, 0.04, 0.6]],
+    wobbleX: [[2, 220, 0.1], [6, 90, 1.4]],
+    wobbleY: [[2, 150, 1.7], [7, 64, -0.5]],
     rotation: -0.08
   },
   {
     id: "spa",
     name: "스파",
     country: "벨기에",
-    width: 150,
-    baseRadiusX: 760,
-    baseRadiusY: 395,
-    harmonics: [[2, 0.18, -0.8], [3, -0.12, 1.1], [4, 0.07, 2.4]],
+    width: 154,
+    baseRadiusX: 1030,
+    baseRadiusY: 580,
+    harmonics: [[2, 0.22, -0.8], [3, -0.15, 1.1], [4, 0.1, 2.4], [8, 0.05, -1.5]],
+    wobbleX: [[5, 120, 0.9], [9, 70, -0.2]],
+    wobbleY: [[4, 95, 2.3], [10, 52, 1.1]],
     rotation: 0.34
   },
   {
     id: "monza",
     name: "몬차",
     country: "이탈리아",
-    width: 152,
-    baseRadiusX: 730,
-    baseRadiusY: 330,
-    harmonics: [[2, -0.05, 0.2], [3, 0.07, -1.7], [6, 0.04, 0.5]],
+    width: 158,
+    baseRadiusX: 1000,
+    baseRadiusY: 500,
+    harmonics: [[2, -0.08, 0.2], [3, 0.11, -1.7], [6, 0.06, 0.5], [12, -0.03, 1.8]],
+    wobbleX: [[4, 95, 2.2], [9, 60, 0.4]],
+    wobbleY: [[3, 75, -0.7], [8, 42, 1.9]],
     rotation: -0.18
   },
   {
     id: "interlagos",
     name: "인터라고스",
     country: "브라질",
-    width: 132,
-    baseRadiusX: 660,
-    baseRadiusY: 365,
-    harmonics: [[2, 0.1, 2.1], [3, 0.12, -0.6], [5, -0.08, 1.5]],
+    width: 138,
+    baseRadiusX: 930,
+    baseRadiusY: 530,
+    harmonics: [[2, 0.13, 2.1], [3, 0.15, -0.6], [5, -0.11, 1.5], [9, 0.05, -2.0]],
+    wobbleX: [[3, 115, -0.3], [7, 68, 2.0]],
+    wobbleY: [[4, 86, 0.8], [11, 48, -1.2]],
     rotation: 0.54
   }
 ];
@@ -158,16 +173,12 @@ export function removeHumanPlayer(state, socketId) {
     car.position = index + 1;
     car.isHost = wasHost && index === 0 ? true : car.isHost && !wasHost;
   });
-  if (state.cars.length > 0 && !state.cars.some((car) => car.isHost)) {
-    state.cars[0].isHost = true;
-  }
+  if (state.cars.length > 0 && !state.cars.some((car) => car.isHost)) state.cars[0].isHost = true;
 }
 
 export function setPlayerReady(state, socketId, ready) {
   const car = state.cars.find((entry) => entry.socketId === socketId);
-  if (!car || state.race.status !== "lobby") {
-    return { ok: false, error: "준비 상태를 바꿀 수 없습니다." };
-  }
+  if (!car || state.race.status !== "lobby") return { ok: false, error: "준비 상태를 바꿀 수 없습니다." };
   car.ready = Boolean(ready);
   return { ok: true, car };
 }
@@ -248,9 +259,11 @@ export function updateGame(state, dtMs) {
   state.timeMs += dtMs;
   for (const car of state.cars) {
     if (car.finished || car.respawnUntil > state.timeMs) continue;
-    updateCarPhysics(car, car.input, dt);
+    applyBoostZone(car, state);
+    updateCarPhysics(car, car.input, dt, state.timeMs);
     constrainToTrack(car, state.circuit);
     updateProgress(car, state);
+    applyBoostZone(car, state);
   }
   separateCars(state);
   rankCars(state).forEach((car, index) => {
@@ -297,6 +310,8 @@ export function buildSnapshot(state) {
       position: car.position,
       ready: car.ready,
       isHost: car.isHost,
+      boosting: car.boostUntil > state.timeMs,
+      boostRemainingMs: Math.max(0, Math.ceil(car.boostUntil - state.timeMs)),
       respawning: car.respawnUntil > state.timeMs,
       respawnRemainingMs: Math.max(0, Math.ceil(car.respawnUntil - state.timeMs)),
       invulnerable: car.invulnerableUntil > state.timeMs,
@@ -307,11 +322,7 @@ export function buildSnapshot(state) {
 }
 
 export function listCircuitSummaries() {
-  return CIRCUITS.map((circuit) => ({
-    id: circuit.id,
-    name: circuit.name,
-    country: circuit.country
-  }));
+  return CIRCUITS.map((circuit) => serializeCircuit(circuit));
 }
 
 function buildCircuit(definition) {
@@ -325,19 +336,27 @@ function buildCircuit(definition) {
     let localX = Math.cos(angle) * definition.baseRadiusX * radiusScale;
     let localY = Math.sin(angle) * definition.baseRadiusY * radiusScale;
     if (definition.figureEight) {
-      localX += Math.sin(angle * 2) * 190;
-      localY += Math.sin(angle) * Math.cos(angle) * 145;
+      localX += Math.sin(angle * 2) * 260;
+      localY += Math.sin(angle) * Math.cos(angle) * 210;
     }
+    for (const [multiple, amount, phase] of definition.wobbleX || []) localX += Math.sin(angle * multiple + phase) * amount;
+    for (const [multiple, amount, phase] of definition.wobbleY || []) localY += Math.cos(angle * multiple + phase) * amount;
     const rotated = rotate(localX, localY, definition.rotation);
     points.push({ x: WORLD_WIDTH / 2 + rotated.x, y: WORLD_HEIGHT / 2 + rotated.y });
   }
-  return {
+
+  const circuit = {
     ...definition,
+    worldWidth: WORLD_WIDTH,
+    worldHeight: WORLD_HEIGHT,
     centerX: WORLD_WIDTH / 2,
     centerY: WORLD_HEIGHT / 2,
     points,
-    checkpoints: buildCheckpoints(points)
+    checkpoints: buildCheckpoints(points),
+    boostZones: buildBoostZones(points)
   };
+  circuit.length = calculateCircuitLength(points);
+  return circuit;
 }
 
 function buildCheckpoints(points) {
@@ -345,6 +364,25 @@ function buildCheckpoints(points) {
     const pointIndex = Math.floor((index / 8) * points.length);
     return { index: pointIndex, point: points[pointIndex] };
   });
+}
+
+function buildBoostZones(points) {
+  const starts = [0.13, 0.29, 0.46, 0.63, 0.78, 0.91];
+  const length = Math.max(7, Math.floor(points.length * 0.035));
+  return starts.map((start, index) => {
+    const startIndex = Math.floor(points.length * start);
+    const endIndex = (startIndex + length) % points.length;
+    return { id: `boost-${index + 1}`, startIndex, endIndex, length };
+  });
+}
+
+function calculateCircuitLength(points) {
+  let total = 0;
+  for (let i = 0; i < points.length; i += 1) {
+    const next = points[(i + 1) % points.length];
+    total += Math.hypot(next.x - points[i].x, next.y - points[i].y);
+  }
+  return Math.round(total);
 }
 
 function getCircuit(circuitId) {
@@ -375,6 +413,7 @@ function createCar({ id, socketId, name, slot, isHost, circuit }) {
     position: slot + 1,
     finished: false,
     finishedAt: null,
+    boostUntil: 0,
     respawnUntil: 0,
     invulnerableUntil: 0,
     input: { ...INPUT_DEFAULTS }
@@ -401,6 +440,7 @@ function resetCarForRace(car, slot, circuit) {
   car.position = slot + 1;
   car.finished = false;
   car.finishedAt = null;
+  car.boostUntil = 0;
   car.respawnUntil = 0;
   car.invulnerableUntil = 0;
   car.input = { ...INPUT_DEFAULTS };
@@ -409,7 +449,7 @@ function resetCarForRace(car, slot, circuit) {
 function getSpawn(circuit, slot) {
   const row = Math.floor(slot / 4);
   const col = slot % 4;
-  const pointIndex = (circuit.points.length - 2 - row * 2 + circuit.points.length) % circuit.points.length;
+  const pointIndex = (circuit.points.length - 3 - row * 2 + circuit.points.length) % circuit.points.length;
   const point = circuit.points[pointIndex];
   const next = circuit.points[(pointIndex + 1) % circuit.points.length];
   const tangent = Math.atan2(next.y - point.y, next.x - point.x);
@@ -444,13 +484,17 @@ function compactInput(input) {
   };
 }
 
-function updateCarPhysics(car, input, dt) {
+function updateCarPhysics(car, input, dt, timeMs) {
   car.previousX = car.x;
   car.previousY = car.y;
-  if (input.throttle) car.speed += ACCELERATION * dt;
+  const boosting = car.boostUntil > timeMs;
+  const acceleration = boosting ? BOOST_ACCELERATION : NORMAL_ACCELERATION;
+  const maxForwardSpeed = boosting ? BOOST_MAX_FORWARD_SPEED : NORMAL_MAX_FORWARD_SPEED;
+
+  if (input.throttle) car.speed += acceleration * dt;
   if (input.brake) car.speed -= BRAKE_FORCE * dt;
-  car.speed = clamp(car.speed, MAX_REVERSE_SPEED, MAX_FORWARD_SPEED);
-  car.speed *= Math.pow(FRICTION, dt * 60);
+  car.speed = clamp(car.speed, MAX_REVERSE_SPEED, maxForwardSpeed);
+  car.speed *= Math.pow(boosting ? 0.992 : FRICTION, dt * 60);
 
   const movementFactor = Math.min(1, Math.abs(car.speed) / 120);
   const steering = (input.right ? 1 : 0) - (input.left ? 1 : 0);
@@ -486,6 +530,24 @@ function updateProgress(car, state) {
     car.finishedAt = state.timeMs;
     car.speed = 0;
   }
+}
+
+function applyBoostZone(car, state) {
+  if (car.speed <= 0) return;
+  if (isInsideBoostZone(state.circuit, car.trackPosition)) {
+    if (car.boostUntil <= state.timeMs) {
+      car.speed = Math.max(car.speed, 560);
+    }
+    car.boostUntil = Math.max(car.boostUntil, state.timeMs + BOOST_DURATION_MS);
+  }
+}
+
+function isInsideBoostZone(circuit, trackPosition) {
+  const normalized = ((trackPosition % circuit.points.length) + circuit.points.length) % circuit.points.length;
+  return circuit.boostZones.some((zone) => {
+    if (zone.startIndex <= zone.endIndex) return normalized >= zone.startIndex && normalized <= zone.endIndex;
+    return normalized >= zone.startIndex || normalized <= zone.endIndex;
+  });
 }
 
 function separateCars(state) {
@@ -542,13 +604,17 @@ function serializeCircuit(circuit) {
     name: circuit.name,
     country: circuit.country,
     width: circuit.width,
+    length: circuit.length,
+    worldWidth: circuit.worldWidth,
+    worldHeight: circuit.worldHeight,
     centerX: circuit.centerX,
     centerY: circuit.centerY,
     points: circuit.points.map((point) => ({ x: round(point.x), y: round(point.y) })),
     checkpoints: circuit.checkpoints.map((checkpoint) => ({
       index: checkpoint.index,
       point: { x: round(checkpoint.point.x), y: round(checkpoint.point.y) }
-    }))
+    })),
+    boostZones: circuit.boostZones.map((zone) => ({ ...zone }))
   };
 }
 

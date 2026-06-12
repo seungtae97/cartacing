@@ -56,6 +56,9 @@ createRoomButton.addEventListener("click", () => {
 });
 
 refreshRoomsButton.addEventListener("click", () => socket.emit("listRooms"));
+circuitSelect.addEventListener("change", () => {
+  if (!snapshot) drawPreview();
+});
 
 readyButton.addEventListener("click", () => {
   const localCar = getLocalCar();
@@ -154,6 +157,7 @@ function renderCircuitOptions() {
       return option;
     })
   );
+  if (!snapshot) drawPreview();
 }
 
 function renderRoomList() {
@@ -312,7 +316,7 @@ function render() {
   resizeCanvas();
   context.clearRect(0, 0, canvas.width, canvas.height);
   if (!snapshot) {
-    drawIdleBackground();
+    drawPreview();
   } else {
     drawWorld();
   }
@@ -338,40 +342,62 @@ function drawIdleBackground() {
   }
 }
 
-function drawWorld() {
-  const world = getWorldTransform();
+function drawPreview() {
+  const circuit = getSelectedCircuit();
+  if (!circuit) {
+    drawIdleBackground();
+    return;
+  }
+
+  const world = getWorldTransform(circuit);
   context.save();
   context.setTransform(world.scale, 0, 0, world.scale, world.offsetX, world.offsetY);
-  drawGrass();
-  drawTrack();
-  drawCheckpoints();
+  drawGrass(circuit);
+  drawTrack(circuit);
+  drawCheckpoints(circuit);
+  drawPreviewTitle(circuit);
+  context.restore();
+}
+
+function drawWorld() {
+  const circuit = snapshot.circuit;
+  const world = getWorldTransform(circuit);
+  context.save();
+  context.setTransform(world.scale, 0, 0, world.scale, world.offsetX, world.offsetY);
+  drawGrass(circuit);
+  drawTrack(circuit);
+  drawCheckpoints(circuit);
   for (const car of [...snapshot.cars].reverse()) drawCar(car);
   if (snapshot.race.status === "lobby") drawCenterText("모든 참가자가 준비하면 방장이 시작할 수 있습니다.");
   context.restore();
 }
 
-function getWorldTransform() {
-  const scale = Math.min(canvas.width / 2000, canvas.height / 1300);
+function getWorldTransform(circuit) {
+  const width = circuit?.worldWidth || 2600;
+  const height = circuit?.worldHeight || 1700;
+  const scale = Math.min(canvas.width / width, canvas.height / height);
   return {
     scale,
-    offsetX: (canvas.width - 2000 * scale) / 2,
-    offsetY: (canvas.height - 1300 * scale) / 2
+    offsetX: (canvas.width - width * scale) / 2,
+    offsetY: (canvas.height - height * scale) / 2
   };
 }
 
-function drawGrass() {
+function drawGrass(circuit) {
+  const width = circuit?.worldWidth || 2600;
+  const height = circuit?.worldHeight || 1700;
   context.fillStyle = "#286c43";
-  context.fillRect(0, 0, 2000, 1300);
+  context.fillRect(0, 0, width, height);
   context.fillStyle = "rgba(255,255,255,0.05)";
-  for (let i = 0; i < 90; i += 1) {
-    context.fillRect((i * 97) % 2000, (i * 151) % 1300, 42, 3);
+  for (let i = 0; i < 130; i += 1) {
+    context.fillRect((i * 97) % width, (i * 151) % height, 42, 3);
   }
 }
 
-function drawTrack() {
-  const circuit = snapshot.circuit;
+function drawTrack(circuit) {
   drawTrackLine(circuit.points, circuit.width + 28, "#111820", []);
   drawTrackLine(circuit.points, circuit.width, "#2b3035", []);
+  drawBoostZones(circuit);
   drawTrackLine(circuit.points, 7, "#f8fbff", [36, 28]);
 }
 
@@ -390,8 +416,32 @@ function drawTrackLine(points, width, color, dash) {
   context.restore();
 }
 
-function drawCheckpoints() {
-  const circuit = snapshot.circuit;
+function drawBoostZones(circuit) {
+  for (const zone of circuit.boostZones || []) {
+    drawTrackSegment(circuit.points, zone.startIndex, zone.length, circuit.width * 0.72, "#39f5ff");
+    drawTrackSegment(circuit.points, zone.startIndex, zone.length, 9, "#fff06a");
+  }
+}
+
+function drawTrackSegment(points, startIndex, length, width, color) {
+  context.save();
+  context.strokeStyle = color;
+  context.lineWidth = width;
+  context.lineCap = "round";
+  context.lineJoin = "round";
+  context.globalAlpha = width > 20 ? 0.45 : 0.95;
+  context.beginPath();
+  const first = points[startIndex % points.length];
+  context.moveTo(first.x, first.y);
+  for (let step = 1; step <= length; step += 1) {
+    const point = points[(startIndex + step) % points.length];
+    context.lineTo(point.x, point.y);
+  }
+  context.stroke();
+  context.restore();
+}
+
+function drawCheckpoints(circuit) {
   for (const checkpoint of circuit.checkpoints) {
     const point = checkpoint.point;
     const next = circuit.points[(checkpoint.index + 1) % circuit.points.length];
@@ -404,6 +454,20 @@ function drawCheckpoints() {
     context.lineTo(point.x + Math.cos(angle) * half, point.y + Math.sin(angle) * half);
     context.stroke();
   }
+}
+
+function drawPreviewTitle(circuit) {
+  context.font = "900 54px system-ui";
+  context.textAlign = "center";
+  context.lineWidth = 8;
+  context.strokeStyle = "rgba(0,0,0,0.65)";
+  context.fillStyle = "#ffffff";
+  context.strokeText(`${circuit.name} 미리보기`, circuit.worldWidth / 2, 150);
+  context.fillText(`${circuit.name} 미리보기`, circuit.worldWidth / 2, 150);
+  context.font = "800 28px system-ui";
+  const detail = `길이 ${Math.round(circuit.length).toLocaleString("ko-KR")}m · 부스트존 ${circuit.boostZones.length}개`;
+  context.strokeText(detail, circuit.worldWidth / 2, 196);
+  context.fillText(detail, circuit.worldWidth / 2, 196);
 }
 
 function drawCar(car) {
@@ -438,8 +502,11 @@ function drawCenterText(text) {
   context.lineWidth = 7;
   context.strokeStyle = "rgba(0,0,0,0.65)";
   context.fillStyle = "#ffffff";
-  context.strokeText(text, 1000, 650);
-  context.fillText(text, 1000, 650);
+  const circuit = snapshot?.circuit || getSelectedCircuit();
+  const x = (circuit?.worldWidth || 2600) / 2;
+  const y = (circuit?.worldHeight || 1700) / 2;
+  context.strokeText(text, x, y);
+  context.fillText(text, x, y);
 }
 
 function roundedRect(x, y, width, height, radius) {
@@ -462,6 +529,10 @@ function getNickname() {
 
 function getLocalCar() {
   return snapshot?.cars.find((car) => car.id === localCarId) || null;
+}
+
+function getSelectedCircuit() {
+  return circuits.find((circuit) => circuit.id === circuitSelect.value) || circuits[0] || null;
 }
 
 function statusText(status) {

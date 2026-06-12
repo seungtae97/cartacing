@@ -11,17 +11,19 @@ import {
   kickPlayer,
   rankCars,
   removeHumanPlayer,
-  setPlayerReady,
   returnToLobby,
   respawnPlayer,
+  setPlayerReady,
   startRace,
   updateGame
 } from "./game.js";
 
-test("at least five Formula-style circuits are available", () => {
+test("at least five long dynamic circuits are available with preview and boost zones", () => {
   assert.ok(CIRCUITS.length >= 5);
   assert.ok(CIRCUITS.some((circuit) => circuit.name.includes("모나코")));
-  assert.ok(CIRCUITS.every((circuit) => circuit.points.length >= 48));
+  assert.ok(CIRCUITS.every((circuit) => circuit.points.length >= 180));
+  assert.ok(CIRCUITS.every((circuit) => circuit.length > 5200));
+  assert.ok(CIRCUITS.every((circuit) => circuit.boostZones.length >= 5));
 });
 
 test("new rooms start without AI cars and remember the selected circuit", () => {
@@ -146,6 +148,31 @@ test("driving backward across the start line does not add laps", () => {
   assert.equal(joined.lap, 0);
 });
 
+test("boost zones make a car much faster for a few seconds", () => {
+  const state = createInitialState({ circuitId: "monza" });
+  const car = addHumanPlayer(state, "socket-a", "민수").car;
+  setPlayerReady(state, "socket-a", true);
+  startRace(state, "socket-a");
+  updateGame(state, 4000);
+
+  const boost = state.circuit.boostZones[0];
+  const boostIndex = (boost.startIndex + 2) % state.circuit.points.length;
+  const point = state.circuit.points[boostIndex];
+  const next = state.circuit.points[(boostIndex + 1) % state.circuit.points.length];
+  car.x = point.x;
+  car.y = point.y;
+  car.angle = Math.atan2(next.y - point.y, next.x - point.x);
+  car.trackPosition = boostIndex;
+  car.speed = 440;
+  applyPlayerInput(state, "socket-a", { throttle: true });
+  updateGame(state, 100);
+
+  assert.ok(car.boostUntil > state.timeMs);
+  assert.ok(car.speed > 500);
+  updateGame(state, 1000);
+  assert.ok(car.boostUntil > state.timeMs);
+});
+
 test("respawn places a stuck car on the track center and locks movement for two seconds", () => {
   const state = createInitialState({ circuitId: "monza" });
   const car = addHumanPlayer(state, "socket-a", "민수").car;
@@ -221,7 +248,7 @@ test("rankCars sorts by finish, lap, checkpoint, and progress", () => {
   );
 });
 
-test("snapshot exposes Korean room data without mutable input objects", () => {
+test("snapshot exposes Korean room and preview data without mutable input objects", () => {
   const state = createInitialState({ roomName: "한국어 방", circuitId: "suzuka" });
   const joined = addHumanPlayer(state, "socket-a", "민수");
   applyPlayerInput(state, "socket-a", { throttle: true });
@@ -231,6 +258,8 @@ test("snapshot exposes Korean room data without mutable input objects", () => {
 
   assert.equal(snapshot.room.name, "한국어 방");
   assert.equal(snapshot.circuit.name, "스즈카");
+  assert.ok(snapshot.circuit.points.length >= 180);
+  assert.ok(snapshot.circuit.boostZones.length >= 5);
   assert.equal(snapshot.cars.length, 1);
   assert.equal(car.name, "민수");
   assert.equal(car.input, undefined);

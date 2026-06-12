@@ -92,6 +92,7 @@ label {
     transparent;
   display: flex;
   inset: 0;
+  justify-content: center;
   padding: 28px;
   position: absolute;
   z-index: 5;
@@ -102,6 +103,13 @@ label {
   gap: 24px;
   grid-template-columns: minmax(280px, 420px) minmax(340px, 620px);
   width: min(100%, 1080px);
+}
+
+.help-text {
+  color: #b8c8d1;
+  font-size: 0.86rem;
+  font-weight: 700;
+  margin: 12px 0 0;
 }
 
 .menu-main,
