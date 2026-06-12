@@ -64,8 +64,7 @@ button:hover {
   z-index: 5;
 }
 
-.join-panel.hidden,
-.hidden {
+.join-panel.hidden {
   display: none;
 }
 
@@ -225,6 +224,10 @@ ol {
 
 .results h2 {
   margin: 0 0 14px;
+}
+
+.hidden {
+  display: none !important;
 }
 
 @media (max-width: 780px) {
