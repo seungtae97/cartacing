@@ -1,55 +1,97 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  CIRCUITS,
   MAX_PARTICIPANTS,
   addHumanPlayer,
   applyPlayerInput,
   buildSnapshot,
+  canStartRace,
   createInitialState,
+  kickPlayer,
   rankCars,
   removeHumanPlayer,
+  setPlayerReady,
+  startRace,
   updateGame
 } from "./game.js";
 
-test("initial state fills the race with twelve AI cars", () => {
-  const state = createInitialState();
-
-  assert.equal(MAX_PARTICIPANTS, 12);
-  assert.equal(state.cars.length, 12);
-  assert.equal(state.cars.filter((car) => car.kind === "ai").length, 12);
-  assert.equal(state.race.totalLaps, 3);
+test("at least five Formula-style circuits are available", () => {
+  assert.ok(CIRCUITS.length >= 5);
+  assert.ok(CIRCUITS.some((circuit) => circuit.name.includes("모나코")));
+  assert.ok(CIRCUITS.every((circuit) => circuit.points.length >= 48));
 });
 
-test("human players occupy slots first and the thirteenth human is rejected", () => {
+test("new rooms start without AI cars and remember the selected circuit", () => {
+  const state = createInitialState({ roomName: "저녁 레이스", circuitId: "monza" });
+
+  assert.equal(MAX_PARTICIPANTS, 12);
+  assert.equal(state.room.name, "저녁 레이스");
+  assert.equal(state.circuit.id, "monza");
+  assert.equal(state.cars.length, 0);
+  assert.equal(state.race.status, "lobby");
+});
+
+test("first human becomes host and the thirteenth human is rejected", () => {
   const state = createInitialState();
 
   for (let i = 0; i < MAX_PARTICIPANTS; i += 1) {
-    const result = addHumanPlayer(state, `socket-${i}`, `Driver ${i}`);
+    const result = addHumanPlayer(state, `socket-${i}`, `드라이버 ${i}`);
     assert.equal(result.ok, true);
     assert.equal(result.car.kind, "human");
+    assert.equal(result.car.isHost, i === 0);
   }
 
-  const rejected = addHumanPlayer(state, "socket-13", "Too Late");
+  const rejected = addHumanPlayer(state, "socket-13", "늦은 참가자");
   assert.equal(rejected.ok, false);
-  assert.match(rejected.error, /full/i);
-  assert.equal(state.cars.filter((car) => car.kind === "human").length, 12);
+  assert.match(rejected.error, /가득/i);
+  assert.equal(state.cars.length, 12);
 });
 
-test("removing a human player refills the slot with an AI car", () => {
+test("ready state gates host race start", () => {
   const state = createInitialState();
-  const joined = addHumanPlayer(state, "socket-a", "Ada");
+  const host = addHumanPlayer(state, "host", "방장").car;
+  addHumanPlayer(state, "guest", "참가자");
 
-  removeHumanPlayer(state, "socket-a");
+  assert.equal(canStartRace(state), false);
+  setPlayerReady(state, "host", true);
+  setPlayerReady(state, "guest", true);
+  assert.equal(canStartRace(state), true);
 
-  assert.equal(joined.ok, true);
-  assert.equal(state.cars.length, 12);
-  assert.equal(state.cars.some((car) => car.socketId === "socket-a"), false);
-  assert.equal(state.cars.filter((car) => car.kind === "ai").length, 12);
+  const started = startRace(state, "host");
+  assert.equal(started.ok, true);
+  assert.equal(state.race.status, "running");
+  assert.equal(host.ready, true);
+});
+
+test("only the host can kick another player", () => {
+  const state = createInitialState();
+  addHumanPlayer(state, "host", "방장");
+  addHumanPlayer(state, "guest", "참가자");
+
+  const denied = kickPlayer(state, "guest", "host");
+  assert.equal(denied.ok, false);
+
+  const kicked = kickPlayer(state, "host", "guest");
+  assert.equal(kicked.ok, true);
+  assert.equal(state.cars.some((car) => car.socketId === "guest"), false);
+});
+
+test("removing the host assigns host to the next player without adding AI", () => {
+  const state = createInitialState();
+  addHumanPlayer(state, "host", "방장");
+  const guest = addHumanPlayer(state, "guest", "참가자").car;
+
+  removeHumanPlayer(state, "host");
+
+  assert.equal(state.cars.length, 1);
+  assert.equal(guest.isHost, true);
+  assert.equal(state.cars.some((car) => car.kind === "ai"), false);
 });
 
 test("player input is compacted to boolean controls", () => {
   const state = createInitialState();
-  const joined = addHumanPlayer(state, "socket-a", "Ada");
+  const joined = addHumanPlayer(state, "socket-a", "민수");
 
   applyPlayerInput(state, "socket-a", {
     throttle: 1,
@@ -67,18 +109,37 @@ test("player input is compacted to boolean controls", () => {
   });
 });
 
-test("throttle input moves a human car forward", () => {
+test("race movement works only after the host starts the race", () => {
   const state = createInitialState();
-  const joined = addHumanPlayer(state, "socket-a", "Ada");
-  const startX = joined.car.x;
-  const startY = joined.car.y;
+  const joined = addHumanPlayer(state, "socket-a", "민수");
+  setPlayerReady(state, "socket-a", true);
+  applyPlayerInput(state, "socket-a", { throttle: true });
 
+  updateGame(state, 500);
+  assert.equal(joined.car.speed, 0);
+
+  startRace(state, "socket-a");
   applyPlayerInput(state, "socket-a", { throttle: true });
   updateGame(state, 500);
-
-  const moved = Math.hypot(joined.car.x - startX, joined.car.y - startY);
-  assert.ok(moved > 1);
   assert.ok(joined.car.speed > 0);
+});
+
+test("colliding cars are separated and slowed down", () => {
+  const state = createInitialState();
+  const a = addHumanPlayer(state, "a", "A").car;
+  const b = addHumanPlayer(state, "b", "B").car;
+  a.x = 1000;
+  a.y = 650;
+  a.speed = 200;
+  b.x = 1005;
+  b.y = 650;
+  b.speed = 200;
+
+  updateGame(state, 16);
+
+  assert.ok(Math.hypot(a.x - b.x, a.y - b.y) > 30);
+  assert.ok(a.speed < 200);
+  assert.ok(b.speed < 200);
 });
 
 test("rankCars sorts by finish, lap, checkpoint, and progress", () => {
@@ -96,16 +157,18 @@ test("rankCars sorts by finish, lap, checkpoint, and progress", () => {
   );
 });
 
-test("snapshot exposes race data without mutable input objects", () => {
-  const state = createInitialState();
-  const joined = addHumanPlayer(state, "socket-a", "Ada");
+test("snapshot exposes Korean room data without mutable input objects", () => {
+  const state = createInitialState({ roomName: "한국어 방", circuitId: "suzuka" });
+  const joined = addHumanPlayer(state, "socket-a", "민수");
   applyPlayerInput(state, "socket-a", { throttle: true });
 
   const snapshot = buildSnapshot(state);
   const car = snapshot.cars.find((entry) => entry.id === joined.car.id);
 
-  assert.equal(snapshot.cars.length, 12);
-  assert.equal(car.name, "Ada");
+  assert.equal(snapshot.room.name, "한국어 방");
+  assert.equal(snapshot.circuit.name, "스즈카");
+  assert.equal(snapshot.cars.length, 1);
+  assert.equal(car.name, "민수");
   assert.equal(car.input, undefined);
   assert.equal(snapshot.race.totalLaps, 3);
 });

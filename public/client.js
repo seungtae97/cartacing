@@ -2,10 +2,21 @@ const socket = io();
 
 const canvas = document.querySelector("#game");
 const context = canvas.getContext("2d");
-const joinPanel = document.querySelector("#joinPanel");
-const joinForm = document.querySelector("#joinForm");
+const menuPanel = document.querySelector("#menuPanel");
+const roomPanel = document.querySelector("#roomPanel");
 const nicknameInput = document.querySelector("#nickname");
+const roomNameInput = document.querySelector("#roomName");
+const circuitSelect = document.querySelector("#circuitSelect");
+const createRoomButton = document.querySelector("#createRoomButton");
+const refreshRoomsButton = document.querySelector("#refreshRoomsButton");
+const roomListEl = document.querySelector("#roomList");
 const connectionStatus = document.querySelector("#connectionStatus");
+const roomTitleEl = document.querySelector("#roomTitle");
+const roomMetaEl = document.querySelector("#roomMeta");
+const participantListEl = document.querySelector("#participantList");
+const readyButton = document.querySelector("#readyButton");
+const startButton = document.querySelector("#startButton");
+const leaveButton = document.querySelector("#leaveButton");
 const positionEl = document.querySelector("#position");
 const lapEl = document.querySelector("#lap");
 const speedEl = document.querySelector("#speed");
@@ -13,14 +24,16 @@ const playersEl = document.querySelector("#players");
 const leaderboardEl = document.querySelector("#leaderboard");
 const resultsPanel = document.querySelector("#resultsPanel");
 const resultsEl = document.querySelector("#results");
-const resetButton = document.querySelector("#resetButton");
-const raceAgainButton = document.querySelector("#raceAgainButton");
+const backToLobbyButton = document.querySelector("#backToLobbyButton");
 
 const keys = new Set();
+let circuits = [];
+let rooms = [];
 let snapshot = null;
 let localCarId = null;
-let lastInput = {};
+let localSocketId = null;
 let joined = false;
+let lastInput = {};
 
 const inputMap = {
   ArrowUp: "throttle",
@@ -33,71 +46,246 @@ const inputMap = {
   KeyD: "right"
 };
 
-joinForm.addEventListener("submit", (event) => {
-  event.preventDefault();
-  const nickname = nicknameInput.value.trim() || `Driver ${Math.floor(Math.random() * 1000)}`;
-  socket.emit("join", { nickname });
+createRoomButton.addEventListener("click", () => {
+  socket.emit("createRoom", {
+    nickname: getNickname(),
+    roomName: roomNameInput.value.trim(),
+    circuitId: circuitSelect.value
+  });
 });
 
-resetButton.addEventListener("click", () => {
-  socket.emit("resetRace");
+refreshRoomsButton.addEventListener("click", () => {
+  socket.emit("listRooms");
 });
 
-raceAgainButton.addEventListener("click", () => {
+readyButton.addEventListener("click", () => {
+  const localCar = getLocalCar();
+  socket.emit("setReady", { ready: !localCar?.ready });
+});
+
+startButton.addEventListener("click", () => {
+  socket.emit("startRace");
+});
+
+leaveButton.addEventListener("click", leaveRoom);
+backToLobbyButton.addEventListener("click", () => {
   resultsPanel.classList.add("hidden");
-  socket.emit("resetRace");
 });
 
 window.addEventListener("keydown", (event) => {
-  if (!inputMap[event.code]) {
-    return;
-  }
+  if (!inputMap[event.code]) return;
   event.preventDefault();
   keys.add(event.code);
   sendInputIfChanged();
-});
+}, true);
 
 window.addEventListener("keyup", (event) => {
-  if (!inputMap[event.code]) {
-    return;
-  }
+  if (!inputMap[event.code]) return;
   event.preventDefault();
   keys.delete(event.code);
   sendInputIfChanged();
-});
+}, true);
 
 socket.on("connect", () => {
-  connectionStatus.textContent = "Connected. Enter a nickname to race.";
+  connectionStatus.textContent = "서버에 연결되었습니다.";
+  socket.emit("listRooms");
 });
 
 socket.on("disconnect", () => {
-  connectionStatus.textContent = "Disconnected. Reconnecting...";
+  connectionStatus.textContent = "연결이 끊겼습니다. 다시 연결 중입니다.";
   joined = false;
-  joinPanel.classList.remove("hidden");
+  menuPanel.classList.remove("hidden");
+  roomPanel.classList.add("hidden");
 });
 
 socket.on("serverInfo", (info) => {
-  connectionStatus.textContent = `Connected as ${info.socketId.slice(0, 5)}.`;
+  localSocketId = info.socketId;
+  circuits = info.circuits || [];
+  renderCircuitOptions();
+});
+
+socket.on("roomList", (nextRooms) => {
+  rooms = nextRooms || [];
+  renderRoomList();
 });
 
 socket.on("joined", (payload) => {
   localCarId = payload.carId;
   joined = true;
-  joinPanel.classList.add("hidden");
-  canvas.focus();
-});
-
-socket.on("joinError", (payload) => {
-  connectionStatus.textContent = payload.message;
+  menuPanel.classList.add("hidden");
+  roomPanel.classList.remove("hidden");
+  resultsPanel.classList.add("hidden");
 });
 
 socket.on("snapshot", (nextSnapshot) => {
   snapshot = nextSnapshot;
+  if (joined && snapshot.race.status === "running") {
+    canvas.focus();
+  }
   updateHud();
+  updateRoomPanel();
 });
 
+socket.on("roomError", (payload) => {
+  connectionStatus.textContent = payload.message;
+});
+
+socket.on("kicked", (payload) => {
+  joined = false;
+  snapshot = null;
+  localCarId = null;
+  menuPanel.classList.remove("hidden");
+  roomPanel.classList.add("hidden");
+  resultsPanel.classList.add("hidden");
+  connectionStatus.textContent = payload.message;
+});
+
+function renderCircuitOptions() {
+  circuitSelect.replaceChildren(
+    ...circuits.map((circuit) => {
+      const option = document.createElement("option");
+      option.value = circuit.id;
+      option.textContent = `${circuit.name} (${circuit.country})`;
+      return option;
+    })
+  );
+}
+
+function renderRoomList() {
+  if (rooms.length === 0) {
+    roomListEl.innerHTML = '<p class="empty-state">열린 방이 없습니다. 새 방을 만들어보세요.</p>';
+    return;
+  }
+
+  roomListEl.replaceChildren(
+    ...rooms.map((room) => {
+      const card = document.createElement("article");
+      card.className = "room-card";
+
+      const body = document.createElement("div");
+      const title = document.createElement("strong");
+      title.textContent = room.name;
+      const meta = document.createElement("span");
+      meta.textContent = `${room.circuitName} · ${statusText(room.status)} · ${room.players}/${room.maxPlayers}명 · 준비 ${room.readyPlayers}명 · 방장 ${room.hostName}`;
+      body.append(title, meta);
+
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = room.status === "lobby" ? "입장" : "진행 중";
+      button.disabled = room.status !== "lobby" || room.players >= room.maxPlayers;
+      button.addEventListener("click", () => {
+        socket.emit("joinRoom", {
+          roomId: room.id,
+          nickname: getNickname()
+        });
+      });
+
+      card.append(body, button);
+      return card;
+    })
+  );
+}
+
+function updateRoomPanel() {
+  if (!snapshot || !joined) return;
+
+  const localCar = getLocalCar();
+  const isHost = Boolean(localCar?.isHost);
+  roomTitleEl.textContent = snapshot.room.name;
+  roomMetaEl.textContent = `${snapshot.circuit.name} · ${statusText(snapshot.race.status)} · ${snapshot.cars.length}/12명`;
+
+  participantListEl.replaceChildren(
+    ...snapshot.cars.map((car) => {
+      const row = document.createElement("div");
+      row.className = "participant";
+
+      const text = document.createElement("div");
+      const name = document.createElement("strong");
+      name.textContent = `${car.name}${car.id === localCarId ? " (나)" : ""}`;
+      const meta = document.createElement("small");
+      const labels = [];
+      if (car.isHost) labels.push("방장");
+      labels.push(car.ready ? "준비 완료" : "대기 중");
+      if (car.finished) labels.push("완주");
+      meta.textContent = labels.join(" · ");
+      text.append(name, meta);
+      row.append(text);
+
+      if (isHost && !car.isHost && snapshot.race.status === "lobby") {
+        const kick = document.createElement("button");
+        kick.type = "button";
+        kick.textContent = "강퇴";
+        kick.addEventListener("click", () => {
+          socket.emit("kickPlayer", { socketId: car.socketId });
+        });
+        row.append(kick);
+      }
+
+      return row;
+    })
+  );
+
+  readyButton.textContent = localCar?.ready ? "준비 취소" : "준비";
+  readyButton.disabled = snapshot.race.status !== "lobby";
+  startButton.disabled = !isHost || !snapshot.race.canStart;
+  leaveButton.disabled = false;
+}
+
+function updateHud() {
+  if (!snapshot) return;
+
+  const localCar = getLocalCar();
+  playersEl.textContent = `${snapshot.cars.length}/12`;
+
+  if (localCar) {
+    positionEl.textContent = `${localCar.position}`;
+    lapEl.textContent = `${Math.min(localCar.lap + 1, snapshot.race.totalLaps)}/${snapshot.race.totalLaps}`;
+    speedEl.textContent = `${Math.max(0, localCar.speed)}`;
+  } else {
+    positionEl.textContent = "--";
+    lapEl.textContent = "--";
+    speedEl.textContent = "0";
+  }
+
+  leaderboardEl.replaceChildren(
+    ...snapshot.cars.map((car) => {
+      const item = document.createElement("li");
+      item.className = car.id === localCarId ? "local" : "";
+      const lapText = car.finished ? "완주" : `${Math.min(car.lap + 1, snapshot.race.totalLaps)}랩`;
+      item.textContent = `${car.name} ${lapText}`;
+      return item;
+    })
+  );
+
+  if (snapshot.race.status === "finished") {
+    showResults();
+  }
+}
+
+function showResults() {
+  resultsPanel.classList.remove("hidden");
+  resultsEl.replaceChildren(
+    ...snapshot.cars.map((car) => {
+      const item = document.createElement("li");
+      item.textContent = `${car.name} - ${car.finishedAt ? `${(car.finishedAt / 1000).toFixed(1)}초` : "미완주"}`;
+      return item;
+    })
+  );
+}
+
+function leaveRoom() {
+  socket.emit("leaveRoom");
+  joined = false;
+  snapshot = null;
+  localCarId = null;
+  menuPanel.classList.remove("hidden");
+  roomPanel.classList.add("hidden");
+  resultsPanel.classList.add("hidden");
+  socket.emit("listRooms");
+}
+
 function sendInputIfChanged() {
-  if (!joined) {
+  if (!joined || snapshot?.race.status !== "running") {
     return;
   }
 
@@ -116,56 +304,14 @@ function sendInputIfChanged() {
   socket.emit("input", input);
 }
 
-function updateHud() {
-  if (!snapshot) {
-    return;
-  }
-
-  const localCar = snapshot.cars.find((car) => car.id === localCarId);
-  const humans = snapshot.cars.filter((car) => car.kind === "human").length;
-  playersEl.textContent = `${humans}/12`;
-
-  if (localCar) {
-    positionEl.textContent = `${localCar.position}`;
-    lapEl.textContent = `${Math.min(localCar.lap + 1, snapshot.race.totalLaps)}/${snapshot.race.totalLaps}`;
-    speedEl.textContent = `${Math.max(0, localCar.speed)}`;
-  } else {
-    positionEl.textContent = "--";
-    lapEl.textContent = "--";
-    speedEl.textContent = "0";
-  }
-
-  leaderboardEl.replaceChildren(
-    ...snapshot.cars.slice(0, 12).map((car) => {
-      const item = document.createElement("li");
-      item.className = car.id === localCarId ? "local" : "";
-      item.textContent = `${car.name} ${car.finished ? "FIN" : `L${Math.min(car.lap + 1, snapshot.race.totalLaps)}`}`;
-      return item;
-    })
-  );
-
-  if (snapshot.race.status === "finished") {
-    showResults();
-  }
-}
-
-function showResults() {
-  resultsPanel.classList.remove("hidden");
-  resultsEl.replaceChildren(
-    ...snapshot.cars.map((car) => {
-      const item = document.createElement("li");
-      item.textContent = `${car.name} - ${car.finishedAt ? `${(car.finishedAt / 1000).toFixed(1)}s` : "DNF"}`;
-      return item;
-    })
-  );
-}
+setInterval(sendInputIfChanged, 50);
 
 function render() {
   resizeCanvas();
   context.clearRect(0, 0, canvas.width, canvas.height);
 
   if (!snapshot) {
-    drawLoading();
+    drawIdleBackground();
     requestAnimationFrame(render);
     return;
   }
@@ -184,25 +330,27 @@ function resizeCanvas() {
   }
 }
 
-function drawLoading() {
-  context.fillStyle = "#163f2a";
+function drawIdleBackground() {
+  context.fillStyle = "#245d3c";
   context.fillRect(0, 0, canvas.width, canvas.height);
-  context.fillStyle = "#f8fbff";
-  context.font = "700 24px system-ui";
-  context.textAlign = "center";
-  context.fillText("Connecting...", canvas.width / 2, canvas.height / 2);
+  context.fillStyle = "rgba(255,255,255,0.06)";
+  for (let i = 0; i < 90; i += 1) {
+    context.fillRect((i * 113) % canvas.width, (i * 157) % canvas.height, 48, 4);
+  }
 }
 
 function drawWorld() {
   const world = getWorldTransform();
   context.save();
   context.setTransform(world.scale, 0, 0, world.scale, world.offsetX, world.offsetY);
-
   drawGrass();
   drawTrack();
   drawCheckpoints();
   for (const car of [...snapshot.cars].reverse()) {
     drawCar(car);
+  }
+  if (snapshot.race.status === "lobby") {
+    drawCenterText("모든 참가자가 준비하면 방장이 시작할 수 있습니다.");
   }
   context.restore();
 }
@@ -220,77 +368,61 @@ function drawGrass() {
   context.fillStyle = "#286c43";
   context.fillRect(0, 0, 2000, 1300);
   context.fillStyle = "rgba(255,255,255,0.05)";
-  for (let i = 0; i < 80; i += 1) {
+  for (let i = 0; i < 90; i += 1) {
     context.fillRect((i * 97) % 2000, (i * 151) % 1300, 42, 3);
   }
 }
 
 function drawTrack() {
-  const track = snapshot.track;
+  const circuit = snapshot.circuit;
+  drawTrackLine(circuit.points, circuit.width + 28, "#111820", []);
+  drawTrackLine(circuit.points, circuit.width, "#2b3035", []);
+  drawTrackLine(circuit.points, 7, "#f8fbff", [36, 28]);
+}
+
+function drawTrackLine(points, width, color, dash) {
   context.save();
-  context.translate(track.centerX, track.centerY);
-
-  context.fillStyle = "#2b3035";
+  context.strokeStyle = color;
+  context.lineWidth = width;
+  context.lineCap = "round";
+  context.lineJoin = "round";
+  context.setLineDash(dash);
   context.beginPath();
-  context.ellipse(0, 0, track.outerRadiusX, track.outerRadiusY, 0, 0, Math.PI * 2);
-  context.fill();
-
-  context.fillStyle = "#286c43";
-  context.beginPath();
-  context.ellipse(0, 0, track.innerRadiusX, track.innerRadiusY, 0, 0, Math.PI * 2);
-  context.fill();
-
-  context.strokeStyle = "#f8fbff";
-  context.lineWidth = 7;
-  context.setLineDash([34, 28]);
-  context.beginPath();
-  context.ellipse(0, 0, 595, 330, 0, 0, Math.PI * 2);
-  context.stroke();
-  context.setLineDash([]);
-
-  context.strokeStyle = "#111820";
-  context.lineWidth = 16;
-  context.beginPath();
-  context.ellipse(0, 0, track.outerRadiusX, track.outerRadiusY, 0, 0, Math.PI * 2);
-  context.stroke();
-  context.beginPath();
-  context.ellipse(0, 0, track.innerRadiusX, track.innerRadiusY, 0, 0, Math.PI * 2);
+  context.moveTo(points[0].x, points[0].y);
+  for (const point of points.slice(1)) {
+    context.lineTo(point.x, point.y);
+  }
+  context.closePath();
   context.stroke();
   context.restore();
 }
 
 function drawCheckpoints() {
-  const track = snapshot.track;
-  context.save();
-  context.translate(track.centerX, track.centerY);
-  for (let i = 0; i < 8; i += 1) {
-    const angle = (i / 8) * Math.PI * 2 - Math.PI / 2;
-    const x1 = Math.cos(angle) * track.innerRadiusX;
-    const y1 = Math.sin(angle) * track.innerRadiusY;
-    const x2 = Math.cos(angle) * track.outerRadiusX;
-    const y2 = Math.sin(angle) * track.outerRadiusY;
-    context.strokeStyle = i === 0 ? "#f4c542" : "rgba(255,255,255,0.18)";
-    context.lineWidth = i === 0 ? 10 : 4;
+  const circuit = snapshot.circuit;
+  for (const checkpoint of circuit.checkpoints) {
+    const point = checkpoint.point;
+    const next = circuit.points[(checkpoint.index + 1) % circuit.points.length];
+    const angle = Math.atan2(next.y - point.y, next.x - point.x) + Math.PI / 2;
+    const half = circuit.width / 2;
+    context.strokeStyle = checkpoint.index === 0 ? "#f4c542" : "rgba(255,255,255,0.22)";
+    context.lineWidth = checkpoint.index === 0 ? 10 : 4;
     context.beginPath();
-    context.moveTo(x1, y1);
-    context.lineTo(x2, y2);
+    context.moveTo(point.x - Math.cos(angle) * half, point.y - Math.sin(angle) * half);
+    context.lineTo(point.x + Math.cos(angle) * half, point.y + Math.sin(angle) * half);
     context.stroke();
   }
-  context.restore();
 }
 
 function drawCar(car) {
   context.save();
   context.translate(car.x, car.y);
   context.rotate(car.angle);
-
   context.fillStyle = car.color;
   context.strokeStyle = car.id === localCarId ? "#ffffff" : "rgba(0,0,0,0.55)";
   context.lineWidth = car.id === localCarId ? 6 : 3;
   roundedRect(-24, -14, 48, 28, 7);
   context.fill();
   context.stroke();
-
   context.fillStyle = "rgba(255,255,255,0.82)";
   roundedRect(4, -9, 15, 18, 4);
   context.fill();
@@ -305,6 +437,16 @@ function drawCar(car) {
   context.fillText(car.name, car.x, car.y - 34);
 }
 
+function drawCenterText(text) {
+  context.font = "800 32px system-ui";
+  context.textAlign = "center";
+  context.lineWidth = 7;
+  context.strokeStyle = "rgba(0,0,0,0.65)";
+  context.fillStyle = "#ffffff";
+  context.strokeText(text, 1000, 650);
+  context.fillText(text, 1000, 650);
+}
+
 function roundedRect(x, y, width, height, radius) {
   context.beginPath();
   context.moveTo(x + radius, y);
@@ -317,6 +459,21 @@ function roundedRect(x, y, width, height, radius) {
   context.lineTo(x, y + radius);
   context.quadraticCurveTo(x, y, x + radius, y);
   context.closePath();
+}
+
+function getNickname() {
+  return nicknameInput.value.trim() || `드라이버 ${Math.floor(Math.random() * 1000)}`;
+}
+
+function getLocalCar() {
+  return snapshot?.cars.find((car) => car.id === localCarId) || null;
+}
+
+function statusText(status) {
+  if (status === "lobby") return "대기 중";
+  if (status === "running") return "진행 중";
+  if (status === "finished") return "종료";
+  return status;
 }
 
 render();
