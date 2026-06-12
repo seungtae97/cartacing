@@ -528,7 +528,6 @@ function constrainToTrack(car, circuit) {
   car.x = car.previousX;
   car.y = car.previousY;
   car.speed *= 0.38;
-  car.angle += 0.06;
 }
 
 function updateProgress(car, state) {

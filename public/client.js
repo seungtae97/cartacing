@@ -368,6 +368,7 @@ function drawPreview() {
   drawGrass(circuit);
   drawTrack(circuit);
   drawCheckpoints(circuit);
+  drawStartDirection(circuit);
   drawPreviewTitle(circuit);
   context.restore();
 }
@@ -380,6 +381,7 @@ function drawWorld() {
   drawGrass(circuit);
   drawTrack(circuit);
   drawCheckpoints(circuit);
+  drawStartDirection(circuit);
   for (const car of [...snapshot.cars].reverse()) drawCar(car);
   if (snapshot.race.status === "lobby") drawCenterText("모든 참가자가 준비하면 방장이 시작할 수 있습니다.");
   context.restore();
@@ -484,6 +486,46 @@ function drawCheckpoints(circuit) {
   }
 }
 
+function drawStartDirection(circuit) {
+  const start = circuit.checkpoints[0];
+  if (!start) return;
+
+  const point = start.point;
+  const next = circuit.points[(start.index + 6) % circuit.points.length];
+  const angle = Math.atan2(next.y - point.y, next.x - point.x);
+  const arrowX = point.x + Math.cos(angle) * 118;
+  const arrowY = point.y + Math.sin(angle) * 118;
+
+  context.save();
+  context.translate(arrowX, arrowY);
+  context.rotate(angle);
+  context.fillStyle = "#ffe76a";
+  context.strokeStyle = "rgba(0,0,0,0.7)";
+  context.lineWidth = 6;
+  context.beginPath();
+  context.moveTo(48, 0);
+  context.lineTo(-18, -30);
+  context.lineTo(-4, -8);
+  context.lineTo(-58, -8);
+  context.lineTo(-58, 8);
+  context.lineTo(-4, 8);
+  context.lineTo(-18, 30);
+  context.closePath();
+  context.stroke();
+  context.fill();
+  context.restore();
+
+  const labelX = arrowX + Math.cos(angle - Math.PI / 2) * 72;
+  const labelY = arrowY + Math.sin(angle - Math.PI / 2) * 72;
+  context.font = "900 24px system-ui";
+  context.textAlign = "center";
+  context.lineWidth = 6;
+  context.strokeStyle = "rgba(0,0,0,0.72)";
+  context.fillStyle = "#ffffff";
+  context.strokeText("진행 방향", labelX, labelY);
+  context.fillText("진행 방향", labelX, labelY);
+}
+
 function drawPreviewTitle(circuit) {
   context.font = "900 54px system-ui";
   context.textAlign = "center";
@@ -504,15 +546,66 @@ function drawCar(car) {
   context.translate(car.x, car.y);
   context.rotate(car.angle);
   context.globalAlpha = car.invulnerable ? 0.65 : 1;
+
+  context.fillStyle = "rgba(0,0,0,0.55)";
+  roundedRect(-28, -18, 56, 36, 9);
+  context.fill();
+
+  context.fillStyle = "#111318";
+  roundedRect(-23, -18, 10, 8, 3);
+  context.fill();
+  roundedRect(13, -18, 10, 8, 3);
+  context.fill();
+  roundedRect(-23, 10, 10, 8, 3);
+  context.fill();
+  roundedRect(13, 10, 10, 8, 3);
+  context.fill();
+
   context.fillStyle = car.color;
-  context.strokeStyle = car.id === localCarId ? "#ffffff" : "rgba(0,0,0,0.55)";
-  context.lineWidth = car.id === localCarId ? 6 : 3;
-  roundedRect(-24, -14, 48, 28, 7);
+  context.strokeStyle = car.id === localCarId ? "#ffffff" : "rgba(0,0,0,0.72)";
+  context.lineWidth = car.id === localCarId ? 5 : 3;
+  roundedRect(-26, -14, 52, 28, 9);
   context.fill();
   context.stroke();
-  context.fillStyle = "rgba(255,255,255,0.82)";
-  roundedRect(4, -9, 15, 18, 4);
+
+  context.fillStyle = "rgba(255,255,255,0.18)";
+  roundedRect(-10, -10, 20, 20, 5);
   context.fill();
+  context.fillStyle = "#bfefff";
+  roundedRect(3, -9, 14, 18, 4);
+  context.fill();
+  context.fillStyle = "rgba(255,255,255,0.78)";
+  roundedRect(-17, -8, 9, 16, 3);
+  context.fill();
+
+  context.fillStyle = "#fff2b3";
+  roundedRect(20, -9, 4, 7, 2);
+  context.fill();
+  roundedRect(20, 2, 4, 7, 2);
+  context.fill();
+  context.fillStyle = "#ff4e4e";
+  roundedRect(-25, -9, 4, 7, 2);
+  context.fill();
+  roundedRect(-25, 2, 4, 7, 2);
+  context.fill();
+
+  context.strokeStyle = "rgba(255,255,255,0.5)";
+  context.lineWidth = 2;
+  context.beginPath();
+  context.moveTo(-2, -11);
+  context.lineTo(14, -11);
+  context.stroke();
+
+  if (car.boosting) {
+    context.fillStyle = "rgba(57,245,255,0.75)";
+    context.beginPath();
+    context.moveTo(-27, -8);
+    context.lineTo(-43, 0);
+    context.lineTo(-27, 8);
+    context.closePath();
+    context.fill();
+  }
+
   context.restore();
 
   context.font = "700 20px system-ui";

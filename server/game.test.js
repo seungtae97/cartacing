@@ -244,6 +244,26 @@ test("colliding cars are separated and slowed down", () => {
   assert.ok(b.speed < 200);
 });
 
+test("hitting a track wall slows the car without forcing a right turn", () => {
+  const state = createInitialState({ circuitId: "monza" });
+  const car = addHumanPlayer(state, "socket-a", "민수").car;
+  setPlayerReady(state, "socket-a", true);
+  startRace(state, "socket-a");
+  updateGame(state, 4000);
+
+  const angleBefore = car.angle;
+  car.previousX = car.x;
+  car.previousY = car.y;
+  car.speed = 240;
+  car.x = 20;
+  car.y = 20;
+
+  updateGame(state, 16);
+
+  assert.equal(car.angle, angleBefore);
+  assert.ok(car.speed < 240);
+});
+
 test("rankCars sorts by finish, lap, checkpoint, and progress", () => {
   const state = createInitialState();
   state.cars = [
