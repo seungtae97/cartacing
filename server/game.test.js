@@ -12,6 +12,8 @@ import {
   rankCars,
   removeHumanPlayer,
   setPlayerReady,
+  returnToLobby,
+  respawnPlayer,
   startRace,
   updateGame
 } from "./game.js";
@@ -60,6 +62,8 @@ test("ready state gates host race start", () => {
 
   const started = startRace(state, "host");
   assert.equal(started.ok, true);
+  assert.equal(state.race.status, "countdown");
+  updateGame(state, 4000);
   assert.equal(state.race.status, "running");
   assert.equal(host.ready, true);
 });
@@ -120,8 +124,68 @@ test("race movement works only after the host starts the race", () => {
 
   startRace(state, "socket-a");
   applyPlayerInput(state, "socket-a", { throttle: true });
+  updateGame(state, 3999);
+  assert.equal(joined.car.speed, 0);
   updateGame(state, 500);
   assert.ok(joined.car.speed > 0);
+});
+
+test("driving backward across the start line does not add laps", () => {
+  const state = createInitialState({ circuitId: "monza" });
+  const joined = addHumanPlayer(state, "socket-a", "민수").car;
+  setPlayerReady(state, "socket-a", true);
+  startRace(state, "socket-a");
+  updateGame(state, 4000);
+
+  joined.trackPosition = 1;
+  joined.totalProgress = 1;
+  joined.x = state.circuit.points[state.circuit.points.length - 1].x;
+  joined.y = state.circuit.points[state.circuit.points.length - 1].y;
+  updateGame(state, 16);
+
+  assert.equal(joined.lap, 0);
+});
+
+test("respawn places a stuck car on the track center and locks movement for two seconds", () => {
+  const state = createInitialState({ circuitId: "monza" });
+  const car = addHumanPlayer(state, "socket-a", "민수").car;
+  setPlayerReady(state, "socket-a", true);
+  startRace(state, "socket-a");
+  updateGame(state, 4000);
+  car.x = 20;
+  car.y = 20;
+  car.speed = 200;
+
+  const result = respawnPlayer(state, "socket-a");
+  assert.equal(result.ok, true);
+  assert.equal(car.speed, 0);
+  assert.ok(car.respawnUntil > state.timeMs);
+  assert.ok(car.invulnerableUntil > state.timeMs);
+
+  applyPlayerInput(state, "socket-a", { throttle: true });
+  updateGame(state, 1000);
+  assert.equal(car.speed, 0);
+  updateGame(state, 1200);
+  applyPlayerInput(state, "socket-a", { throttle: true });
+  updateGame(state, 300);
+  assert.ok(car.speed > 0);
+});
+
+test("finished races can return to the same room lobby", () => {
+  const state = createInitialState();
+  const car = addHumanPlayer(state, "socket-a", "민수").car;
+  setPlayerReady(state, "socket-a", true);
+  startRace(state, "socket-a");
+  updateGame(state, 4000);
+  car.finished = true;
+  updateGame(state, 16);
+  assert.equal(state.race.status, "finished");
+
+  const result = returnToLobby(state);
+  assert.equal(result.ok, true);
+  assert.equal(state.race.status, "lobby");
+  assert.equal(car.ready, false);
+  assert.equal(car.finished, false);
 });
 
 test("colliding cars are separated and slowed down", () => {

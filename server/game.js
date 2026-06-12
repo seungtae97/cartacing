@@ -12,6 +12,8 @@ const ACCELERATION = 320;
 const BRAKE_FORCE = 430;
 const FRICTION = 0.986;
 const TURN_RATE = 3.35;
+const COUNTDOWN_MS = 4000;
+const RESPAWN_LOCK_MS = 2000;
 
 const INPUT_DEFAULTS = Object.freeze({
   throttle: false,
@@ -43,11 +45,7 @@ const CIRCUIT_DEFS = [
     width: 118,
     baseRadiusX: 610,
     baseRadiusY: 385,
-    harmonics: [
-      [2, 0.13, 0.4],
-      [3, -0.09, 1.9],
-      [5, 0.06, -0.7]
-    ],
+    harmonics: [[2, 0.13, 0.4], [3, -0.09, 1.9], [5, 0.06, -0.7]],
     rotation: -0.42
   },
   {
@@ -57,11 +55,7 @@ const CIRCUIT_DEFS = [
     width: 140,
     baseRadiusX: 700,
     baseRadiusY: 360,
-    harmonics: [
-      [2, -0.08, 0.1],
-      [4, 0.12, 1.2],
-      [6, -0.04, 2.6]
-    ],
+    harmonics: [[2, -0.08, 0.1], [4, 0.12, 1.2], [6, -0.04, 2.6]],
     rotation: 0.16
   },
   {
@@ -72,11 +66,7 @@ const CIRCUIT_DEFS = [
     figureEight: true,
     baseRadiusX: 640,
     baseRadiusY: 340,
-    harmonics: [
-      [2, 0.16, 0.7],
-      [3, 0.08, -1.1],
-      [5, -0.05, 2.3]
-    ],
+    harmonics: [[2, 0.16, 0.7], [3, 0.08, -1.1], [5, -0.05, 2.3]],
     rotation: -0.08
   },
   {
@@ -86,11 +76,7 @@ const CIRCUIT_DEFS = [
     width: 150,
     baseRadiusX: 760,
     baseRadiusY: 395,
-    harmonics: [
-      [2, 0.18, -0.8],
-      [3, -0.12, 1.1],
-      [4, 0.07, 2.4]
-    ],
+    harmonics: [[2, 0.18, -0.8], [3, -0.12, 1.1], [4, 0.07, 2.4]],
     rotation: 0.34
   },
   {
@@ -100,11 +86,7 @@ const CIRCUIT_DEFS = [
     width: 152,
     baseRadiusX: 730,
     baseRadiusY: 330,
-    harmonics: [
-      [2, -0.05, 0.2],
-      [3, 0.07, -1.7],
-      [6, 0.04, 0.5]
-    ],
+    harmonics: [[2, -0.05, 0.2], [3, 0.07, -1.7], [6, 0.04, 0.5]],
     rotation: -0.18
   },
   {
@@ -114,11 +96,7 @@ const CIRCUIT_DEFS = [
     width: 132,
     baseRadiusX: 660,
     baseRadiusY: 365,
-    harmonics: [
-      [2, 0.1, 2.1],
-      [3, 0.12, -0.6],
-      [5, -0.08, 1.5]
-    ],
+    harmonics: [[2, 0.1, 2.1], [3, 0.12, -0.6], [5, -0.08, 1.5]],
     rotation: 0.54
   }
 ];
@@ -141,6 +119,7 @@ export function createInitialState(options = {}) {
     race: {
       status: "lobby",
       totalLaps: TOTAL_LAPS,
+      countdownRemainingMs: 0,
       startedAt: null,
       finishedAt: null
     },
@@ -150,17 +129,9 @@ export function createInitialState(options = {}) {
 
 export function addHumanPlayer(state, socketId, nickname) {
   const existing = state.cars.find((car) => car.socketId === socketId);
-  if (existing) {
-    return { ok: true, car: existing };
-  }
-
-  if (state.cars.length >= MAX_PARTICIPANTS) {
-    return { ok: false, error: "방이 가득 찼습니다." };
-  }
-
-  if (state.race.status !== "lobby") {
-    return { ok: false, error: "이미 시작된 방입니다." };
-  }
+  if (existing) return { ok: true, car: existing };
+  if (state.cars.length >= MAX_PARTICIPANTS) return { ok: false, error: "방이 가득 찼습니다." };
+  if (state.race.status !== "lobby") return { ok: false, error: "이미 시작된 방입니다." };
 
   const slot = state.cars.length;
   const car = createCar({
@@ -177,9 +148,7 @@ export function addHumanPlayer(state, socketId, nickname) {
 
 export function removeHumanPlayer(state, socketId) {
   const removedIndex = state.cars.findIndex((car) => car.socketId === socketId);
-  if (removedIndex === -1) {
-    return;
-  }
+  if (removedIndex === -1) return;
 
   const wasHost = state.cars[removedIndex].isHost;
   state.cars.splice(removedIndex, 1);
@@ -189,7 +158,6 @@ export function removeHumanPlayer(state, socketId) {
     car.position = index + 1;
     car.isHost = wasHost && index === 0 ? true : car.isHost && !wasHost;
   });
-
   if (state.cars.length > 0 && !state.cars.some((car) => car.isHost)) {
     state.cars[0].isHost = true;
   }
@@ -210,70 +178,84 @@ export function canStartRace(state) {
 
 export function startRace(state, socketId) {
   const host = state.cars.find((car) => car.socketId === socketId && car.isHost);
-  if (!host) {
-    return { ok: false, error: "방장만 게임을 시작할 수 있습니다." };
-  }
-  if (!canStartRace(state)) {
-    return { ok: false, error: "모든 참가자가 준비해야 합니다." };
-  }
+  if (!host) return { ok: false, error: "방장만 게임을 시작할 수 있습니다." };
+  if (!canStartRace(state)) return { ok: false, error: "모든 참가자가 준비해야 합니다." };
 
   state.timeMs = 0;
-  state.race.status = "running";
+  state.race.status = "countdown";
+  state.race.countdownRemainingMs = COUNTDOWN_MS;
   state.race.startedAt = Date.now();
   state.race.finishedAt = null;
   state.cars.forEach((car, index) => resetCarForRace(car, index, state.circuit));
   return { ok: true };
 }
 
+export function returnToLobby(state) {
+  if (state.race.status !== "finished") return { ok: false, error: "아직 종료된 레이스가 아닙니다." };
+  state.timeMs = 0;
+  state.race.status = "lobby";
+  state.race.countdownRemainingMs = 0;
+  state.race.startedAt = null;
+  state.race.finishedAt = null;
+  state.cars.forEach((car, index) => {
+    car.ready = false;
+    resetCarForRace(car, index, state.circuit);
+  });
+  return { ok: true };
+}
+
 export function kickPlayer(state, hostSocketId, targetSocketId) {
   const host = state.cars.find((car) => car.socketId === hostSocketId && car.isHost);
-  if (!host) {
-    return { ok: false, error: "방장만 강퇴할 수 있습니다." };
-  }
-  if (hostSocketId === targetSocketId) {
-    return { ok: false, error: "자기 자신은 강퇴할 수 없습니다." };
-  }
+  if (!host) return { ok: false, error: "방장만 강퇴할 수 있습니다." };
+  if (hostSocketId === targetSocketId) return { ok: false, error: "자기 자신은 강퇴할 수 없습니다." };
   const target = state.cars.find((car) => car.socketId === targetSocketId);
-  if (!target) {
-    return { ok: false, error: "대상을 찾을 수 없습니다." };
-  }
+  if (!target) return { ok: false, error: "대상을 찾을 수 없습니다." };
   removeHumanPlayer(state, targetSocketId);
   return { ok: true, kicked: target };
 }
 
 export function applyPlayerInput(state, socketId, input = {}) {
   const car = state.cars.find((entry) => entry.socketId === socketId);
-  if (!car) {
-    return;
-  }
+  if (!car) return;
   car.input = compactInput(input);
 }
 
-export function updateGame(state, dtMs) {
-  separateCars(state.cars);
+export function respawnPlayer(state, socketId) {
+  if (state.race.status !== "running") return { ok: false, error: "레이스 중에만 리스폰할 수 있습니다." };
+  const car = state.cars.find((entry) => entry.socketId === socketId);
+  if (!car || car.finished) return { ok: false, error: "리스폰할 수 없습니다." };
+  placeCarOnTrackCenter(car, state.circuit, car.trackPosition);
+  car.speed = 0;
+  car.input = { ...INPUT_DEFAULTS };
+  car.respawnUntil = state.timeMs + RESPAWN_LOCK_MS;
+  car.invulnerableUntil = state.timeMs + RESPAWN_LOCK_MS;
+  return { ok: true, car };
+}
 
-  if (state.race.status !== "running") {
-    return;
+export function updateGame(state, dtMs) {
+  separateCars(state);
+  if (state.race.status === "countdown") {
+    const remainingBeforeTick = state.race.countdownRemainingMs;
+    state.race.countdownRemainingMs = Math.max(0, state.race.countdownRemainingMs - dtMs);
+    if (state.race.countdownRemainingMs > 0) return;
+    state.race.status = "running";
+    dtMs = Math.max(0, dtMs - remainingBeforeTick);
+    if (dtMs === 0) return;
   }
+  if (state.race.status !== "running") return;
 
   const dt = Math.min(dtMs, 100) / 1000;
   state.timeMs += dtMs;
-
   for (const car of state.cars) {
-    if (car.finished) {
-      continue;
-    }
-
+    if (car.finished || car.respawnUntil > state.timeMs) continue;
     updateCarPhysics(car, car.input, dt);
     constrainToTrack(car, state.circuit);
     updateProgress(car, state);
   }
-
-  separateCars(state.cars);
+  separateCars(state);
   rankCars(state).forEach((car, index) => {
     car.position = index + 1;
   });
-
   if (state.cars.length > 0 && state.cars.every((car) => car.finished) && state.race.status !== "finished") {
     state.race.status = "finished";
     state.race.finishedAt = state.timeMs;
@@ -283,20 +265,11 @@ export function updateGame(state, dtMs) {
 export function rankCars(state) {
   return [...state.cars].sort((a, b) => {
     if (a.finished || b.finished) {
-      if (a.finished && b.finished) {
-        return a.finishedAt - b.finishedAt;
-      }
+      if (a.finished && b.finished) return a.finishedAt - b.finishedAt;
       return a.finished ? -1 : 1;
     }
-
-    if (a.lap !== b.lap) {
-      return b.lap - a.lap;
-    }
-
-    if (a.checkpoint !== b.checkpoint) {
-      return b.checkpoint - a.checkpoint;
-    }
-
+    if (a.lap !== b.lap) return b.lap - a.lap;
+    if (a.checkpoint !== b.checkpoint) return b.checkpoint - a.checkpoint;
     return b.progress - a.progress;
   });
 }
@@ -324,6 +297,9 @@ export function buildSnapshot(state) {
       position: car.position,
       ready: car.ready,
       isHost: car.isHost,
+      respawning: car.respawnUntil > state.timeMs,
+      respawnRemainingMs: Math.max(0, Math.ceil(car.respawnUntil - state.timeMs)),
+      invulnerable: car.invulnerableUntil > state.timeMs,
       finished: car.finished,
       finishedAt: car.finishedAt
     }))
@@ -346,21 +322,15 @@ function buildCircuit(definition) {
     for (const [multiple, amount, phase] of definition.harmonics) {
       radiusScale += Math.sin(angle * multiple + phase) * amount;
     }
-
     let localX = Math.cos(angle) * definition.baseRadiusX * radiusScale;
     let localY = Math.sin(angle) * definition.baseRadiusY * radiusScale;
     if (definition.figureEight) {
       localX += Math.sin(angle * 2) * 190;
       localY += Math.sin(angle) * Math.cos(angle) * 145;
     }
-
     const rotated = rotate(localX, localY, definition.rotation);
-    points.push({
-      x: WORLD_WIDTH / 2 + rotated.x,
-      y: WORLD_HEIGHT / 2 + rotated.y
-    });
+    points.push({ x: WORLD_WIDTH / 2 + rotated.x, y: WORLD_HEIGHT / 2 + rotated.y });
   }
-
   return {
     ...definition,
     centerX: WORLD_WIDTH / 2,
@@ -373,10 +343,7 @@ function buildCircuit(definition) {
 function buildCheckpoints(points) {
   return Array.from({ length: 8 }, (_unused, index) => {
     const pointIndex = Math.floor((index / 8) * points.length);
-    return {
-      index: pointIndex,
-      point: points[pointIndex]
-    };
+    return { index: pointIndex, point: points[pointIndex] };
   });
 }
 
@@ -404,9 +371,12 @@ function createCar({ id, socketId, name, slot, isHost, circuit }) {
     checkpoint: 0,
     progress: 0,
     trackPosition: 0,
+    totalProgress: 0,
     position: slot + 1,
     finished: false,
     finishedAt: null,
+    respawnUntil: 0,
+    invulnerableUntil: 0,
     input: { ...INPUT_DEFAULTS }
   };
   resetCarForRace(car, slot, circuit);
@@ -426,10 +396,13 @@ function resetCarForRace(car, slot, circuit) {
   car.lap = 0;
   car.checkpoint = 0;
   car.progress = 0;
-  car.trackPosition = 0;
+  car.trackPosition = spawn.trackPosition;
+  car.totalProgress = 0;
   car.position = slot + 1;
   car.finished = false;
   car.finishedAt = null;
+  car.respawnUntil = 0;
+  car.invulnerableUntil = 0;
   car.input = { ...INPUT_DEFAULTS };
 }
 
@@ -445,8 +418,21 @@ function getSpawn(circuit, slot) {
   return {
     x: point.x + Math.cos(normal) * lateral,
     y: point.y + Math.sin(normal) * lateral,
-    angle: tangent
+    angle: tangent,
+    trackPosition: pointIndex
   };
+}
+
+function placeCarOnTrackCenter(car, circuit, trackPosition) {
+  const index = ((Math.round(trackPosition) % circuit.points.length) + circuit.points.length) % circuit.points.length;
+  const point = circuit.points[index];
+  const next = circuit.points[(index + 1) % circuit.points.length];
+  car.x = point.x;
+  car.y = point.y;
+  car.previousX = point.x;
+  car.previousY = point.y;
+  car.angle = Math.atan2(next.y - point.y, next.x - point.x);
+  car.trackPosition = index;
 }
 
 function compactInput(input) {
@@ -461,14 +447,8 @@ function compactInput(input) {
 function updateCarPhysics(car, input, dt) {
   car.previousX = car.x;
   car.previousY = car.y;
-
-  if (input.throttle) {
-    car.speed += ACCELERATION * dt;
-  }
-  if (input.brake) {
-    car.speed -= BRAKE_FORCE * dt;
-  }
-
+  if (input.throttle) car.speed += ACCELERATION * dt;
+  if (input.brake) car.speed -= BRAKE_FORCE * dt;
   car.speed = clamp(car.speed, MAX_REVERSE_SPEED, MAX_FORWARD_SPEED);
   car.speed *= Math.pow(FRICTION, dt * 60);
 
@@ -482,10 +462,7 @@ function updateCarPhysics(car, input, dt) {
 function constrainToTrack(car, circuit) {
   const nearest = findNearestTrackPosition(circuit, car.x, car.y);
   const maxDistance = circuit.width / 2 - CAR_RADIUS + 24;
-  if (nearest.distance <= maxDistance) {
-    return;
-  }
-
+  if (nearest.distance <= maxDistance) return;
   car.x = car.previousX;
   car.y = car.previousY;
   car.speed *= 0.38;
@@ -494,33 +471,35 @@ function constrainToTrack(car, circuit) {
 
 function updateProgress(car, state) {
   const nearest = findNearestTrackPosition(state.circuit, car.x, car.y);
-  const nextPosition = nearest.position;
-  const checkpoint = Math.floor((nextPosition / state.circuit.points.length) * state.circuit.checkpoints.length);
+  const trackLength = state.circuit.points.length;
+  let delta = nearest.position - car.trackPosition;
+  if (delta < -trackLength / 2) delta += trackLength;
+  if (delta > trackLength / 2) delta -= trackLength;
+  if (delta > 0) car.totalProgress += delta;
 
-  if (car.trackPosition > state.circuit.points.length * 0.82 && nextPosition < state.circuit.points.length * 0.18) {
-    car.lap += 1;
-    if (car.lap >= TOTAL_LAPS) {
-      car.finished = true;
-      car.finishedAt = state.timeMs;
-      car.speed = 0;
-    }
+  car.trackPosition = nearest.position;
+  car.lap = Math.min(TOTAL_LAPS, Math.floor(car.totalProgress / trackLength));
+  car.progress = (car.totalProgress % trackLength) / trackLength;
+  car.checkpoint = Math.floor(car.progress * state.circuit.checkpoints.length);
+  if (car.lap >= TOTAL_LAPS) {
+    car.finished = true;
+    car.finishedAt = state.timeMs;
+    car.speed = 0;
   }
-
-  car.trackPosition = nextPosition;
-  car.checkpoint = checkpoint;
-  car.progress = nextPosition / state.circuit.points.length;
 }
 
-function separateCars(cars) {
+function separateCars(state) {
+  const cars = state.cars || state;
+  const now = state.timeMs ?? 0;
   for (let i = 0; i < cars.length; i += 1) {
     for (let j = i + 1; j < cars.length; j += 1) {
       const a = cars[i];
       const b = cars[j];
+      if (a.invulnerableUntil > now || b.invulnerableUntil > now) continue;
       const dx = b.x - a.x;
       const dy = b.y - a.y;
       const distance = Math.hypot(dx, dy);
       const minDistance = CAR_RADIUS * 1.8;
-
       if (distance > 0 && distance < minDistance) {
         const overlap = (minDistance - distance) / 2;
         const nx = dx / distance;
@@ -537,23 +516,13 @@ function separateCars(cars) {
 }
 
 function findNearestTrackPosition(circuit, x, y) {
-  let best = {
-    distance: Number.POSITIVE_INFINITY,
-    position: 0
-  };
-
+  let best = { distance: Number.POSITIVE_INFINITY, position: 0 };
   for (let i = 0; i < circuit.points.length; i += 1) {
     const start = circuit.points[i];
     const end = circuit.points[(i + 1) % circuit.points.length];
     const projection = projectPointToSegment(x, y, start, end);
-    if (projection.distance < best.distance) {
-      best = {
-        distance: projection.distance,
-        position: i + projection.t
-      };
-    }
+    if (projection.distance < best.distance) best = { distance: projection.distance, position: i + projection.t };
   }
-
   return best;
 }
 
@@ -564,10 +533,7 @@ function projectPointToSegment(x, y, start, end) {
   const t = clamp(((x - start.x) * dx + (y - start.y) * dy) / lengthSquared, 0, 1);
   const px = start.x + dx * t;
   const py = start.y + dy * t;
-  return {
-    t,
-    distance: Math.hypot(x - px, y - py)
-  };
+  return { t, distance: Math.hypot(x - px, y - py) };
 }
 
 function serializeCircuit(circuit) {
@@ -587,10 +553,7 @@ function serializeCircuit(circuit) {
 }
 
 function rotate(x, y, angle) {
-  return {
-    x: x * Math.cos(angle) - y * Math.sin(angle),
-    y: x * Math.sin(angle) + y * Math.cos(angle)
-  };
+  return { x: x * Math.cos(angle) - y * Math.sin(angle), y: x * Math.sin(angle) + y * Math.cos(angle) };
 }
 
 function normalizeName(nickname) {

@@ -22,6 +22,7 @@ const lapEl = document.querySelector("#lap");
 const speedEl = document.querySelector("#speed");
 const playersEl = document.querySelector("#players");
 const leaderboardEl = document.querySelector("#leaderboard");
+const countdownOverlay = document.querySelector("#countdownOverlay");
 const resultsPanel = document.querySelector("#resultsPanel");
 const resultsEl = document.querySelector("#results");
 const backToLobbyButton = document.querySelector("#backToLobbyButton");
@@ -54,25 +55,23 @@ createRoomButton.addEventListener("click", () => {
   });
 });
 
-refreshRoomsButton.addEventListener("click", () => {
-  socket.emit("listRooms");
-});
+refreshRoomsButton.addEventListener("click", () => socket.emit("listRooms"));
 
 readyButton.addEventListener("click", () => {
   const localCar = getLocalCar();
   socket.emit("setReady", { ready: !localCar?.ready });
 });
 
-startButton.addEventListener("click", () => {
-  socket.emit("startRace");
-});
-
+startButton.addEventListener("click", () => socket.emit("startRace"));
 leaveButton.addEventListener("click", leaveRoom);
-backToLobbyButton.addEventListener("click", () => {
-  resultsPanel.classList.add("hidden");
-});
+backToLobbyButton.addEventListener("click", () => socket.emit("returnToLobby"));
 
 window.addEventListener("keydown", (event) => {
+  if (event.code === "KeyR") {
+    event.preventDefault();
+    socket.emit("respawn");
+    return;
+  }
   if (!inputMap[event.code]) return;
   event.preventDefault();
   keys.add(event.code);
@@ -115,15 +114,21 @@ socket.on("joined", (payload) => {
   menuPanel.classList.add("hidden");
   roomPanel.classList.remove("hidden");
   resultsPanel.classList.add("hidden");
+  canvas.focus();
 });
 
 socket.on("snapshot", (nextSnapshot) => {
+  const previousStatus = snapshot?.race.status;
   snapshot = nextSnapshot;
-  if (joined && snapshot.race.status === "running") {
+  if (joined && (snapshot.race.status === "running" || snapshot.race.status === "countdown")) {
     canvas.focus();
+  }
+  if (previousStatus === "finished" && snapshot.race.status === "lobby") {
+    resultsPanel.classList.add("hidden");
   }
   updateHud();
   updateRoomPanel();
+  updateCountdown();
 });
 
 socket.on("roomError", (payload) => {
@@ -174,10 +179,7 @@ function renderRoomList() {
       button.textContent = room.status === "lobby" ? "입장" : "진행 중";
       button.disabled = room.status !== "lobby" || room.players >= room.maxPlayers;
       button.addEventListener("click", () => {
-        socket.emit("joinRoom", {
-          roomId: room.id,
-          nickname: getNickname()
-        });
+        socket.emit("joinRoom", { roomId: room.id, nickname: getNickname() });
       });
 
       card.append(body, button);
@@ -206,6 +208,7 @@ function updateRoomPanel() {
       const labels = [];
       if (car.isHost) labels.push("방장");
       labels.push(car.ready ? "준비 완료" : "대기 중");
+      if (car.respawning) labels.push("리스폰 중");
       if (car.finished) labels.push("완주");
       meta.textContent = labels.join(" · ");
       text.append(name, meta);
@@ -215,12 +218,9 @@ function updateRoomPanel() {
         const kick = document.createElement("button");
         kick.type = "button";
         kick.textContent = "강퇴";
-        kick.addEventListener("click", () => {
-          socket.emit("kickPlayer", { socketId: car.socketId });
-        });
+        kick.addEventListener("click", () => socket.emit("kickPlayer", { socketId: car.socketId }));
         row.append(kick);
       }
-
       return row;
     })
   );
@@ -236,7 +236,6 @@ function updateHud() {
 
   const localCar = getLocalCar();
   playersEl.textContent = `${snapshot.cars.length}/12`;
-
   if (localCar) {
     positionEl.textContent = `${localCar.position}`;
     lapEl.textContent = `${Math.min(localCar.lap + 1, snapshot.race.totalLaps)}/${snapshot.race.totalLaps}`;
@@ -257,9 +256,18 @@ function updateHud() {
     })
   );
 
-  if (snapshot.race.status === "finished") {
-    showResults();
+  if (snapshot.race.status === "finished") showResults();
+}
+
+function updateCountdown() {
+  if (!snapshot || snapshot.race.status !== "countdown") {
+    countdownOverlay.classList.add("hidden");
+    return;
   }
+  const remaining = snapshot.race.countdownRemainingMs;
+  const label = remaining <= 800 ? "GO" : String(Math.ceil((remaining - 800) / 1000));
+  countdownOverlay.textContent = label;
+  countdownOverlay.classList.remove("hidden");
 }
 
 function showResults() {
@@ -285,9 +293,7 @@ function leaveRoom() {
 }
 
 function sendInputIfChanged() {
-  if (!joined || snapshot?.race.status !== "running") {
-    return;
-  }
+  if (!joined || snapshot?.race.status !== "running") return;
 
   const input = {
     throttle: keys.has("ArrowUp") || keys.has("KeyW"),
@@ -295,11 +301,7 @@ function sendInputIfChanged() {
     left: keys.has("ArrowLeft") || keys.has("KeyA"),
     right: keys.has("ArrowRight") || keys.has("KeyD")
   };
-
-  if (JSON.stringify(input) === JSON.stringify(lastInput)) {
-    return;
-  }
-
+  if (JSON.stringify(input) === JSON.stringify(lastInput)) return;
   lastInput = input;
   socket.emit("input", input);
 }
@@ -309,14 +311,11 @@ setInterval(sendInputIfChanged, 50);
 function render() {
   resizeCanvas();
   context.clearRect(0, 0, canvas.width, canvas.height);
-
   if (!snapshot) {
     drawIdleBackground();
-    requestAnimationFrame(render);
-    return;
+  } else {
+    drawWorld();
   }
-
-  drawWorld();
   requestAnimationFrame(render);
 }
 
@@ -346,12 +345,8 @@ function drawWorld() {
   drawGrass();
   drawTrack();
   drawCheckpoints();
-  for (const car of [...snapshot.cars].reverse()) {
-    drawCar(car);
-  }
-  if (snapshot.race.status === "lobby") {
-    drawCenterText("모든 참가자가 준비하면 방장이 시작할 수 있습니다.");
-  }
+  for (const car of [...snapshot.cars].reverse()) drawCar(car);
+  if (snapshot.race.status === "lobby") drawCenterText("모든 참가자가 준비하면 방장이 시작할 수 있습니다.");
   context.restore();
 }
 
@@ -389,9 +384,7 @@ function drawTrackLine(points, width, color, dash) {
   context.setLineDash(dash);
   context.beginPath();
   context.moveTo(points[0].x, points[0].y);
-  for (const point of points.slice(1)) {
-    context.lineTo(point.x, point.y);
-  }
+  for (const point of points.slice(1)) context.lineTo(point.x, point.y);
   context.closePath();
   context.stroke();
   context.restore();
@@ -414,9 +407,11 @@ function drawCheckpoints() {
 }
 
 function drawCar(car) {
+  if (car.respawning && Math.floor(Date.now() / 160) % 2 === 0) return;
   context.save();
   context.translate(car.x, car.y);
   context.rotate(car.angle);
+  context.globalAlpha = car.invulnerable ? 0.65 : 1;
   context.fillStyle = car.color;
   context.strokeStyle = car.id === localCarId ? "#ffffff" : "rgba(0,0,0,0.55)";
   context.lineWidth = car.id === localCarId ? 6 : 3;
@@ -471,6 +466,7 @@ function getLocalCar() {
 
 function statusText(status) {
   if (status === "lobby") return "대기 중";
+  if (status === "countdown") return "카운트다운";
   if (status === "running") return "진행 중";
   if (status === "finished") return "종료";
   return status;

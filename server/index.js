@@ -13,6 +13,8 @@ import {
   kickPlayer,
   listCircuitSummaries,
   removeHumanPlayer,
+  respawnPlayer,
+  returnToLobby,
   setPlayerReady,
   startRace,
   updateGame
@@ -136,6 +138,29 @@ io.on("connection", (socket) => {
     applyPlayerInput(state, socket.id, input);
   });
 
+  socket.on("respawn", () => {
+    const state = getSocketRoom(socket);
+    if (!state) return;
+    const result = respawnPlayer(state, socket.id);
+    if (!result.ok) {
+      socket.emit("roomError", { message: result.error });
+      return;
+    }
+    broadcastRoom(state);
+  });
+
+  socket.on("returnToLobby", () => {
+    const state = getSocketRoom(socket);
+    if (!state) return;
+    const result = returnToLobby(state);
+    if (!result.ok) {
+      socket.emit("roomError", { message: result.error });
+      return;
+    }
+    broadcastRoom(state);
+    broadcastRoomList();
+  });
+
   socket.on("disconnect", () => {
     leaveCurrentRoom(socket);
     broadcastRoomList();
@@ -178,9 +203,7 @@ function joinStateRoom(socket, state, nickname) {
 
 function leaveCurrentRoom(socket) {
   const state = getSocketRoom(socket);
-  if (!state) {
-    return;
-  }
+  if (!state) return;
 
   removeHumanPlayer(state, socket.id);
   socket.leave(state.room.id);
@@ -190,14 +213,11 @@ function leaveCurrentRoom(socket) {
     rooms.delete(state.room.id);
     return;
   }
-
   broadcastRoom(state);
 }
 
 function getSocketRoom(socket) {
-  if (!socket.data.roomId) {
-    return null;
-  }
+  if (!socket.data.roomId) return null;
   return rooms.get(socket.data.roomId) || null;
 }
 
