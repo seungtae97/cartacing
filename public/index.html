@@ -1,1 +1,67 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Cartacing</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="game-shell">
+      <canvas id="game" width="2000" height="1300" aria-label="2D racing game"></canvas>
 
+      <section class="join-panel" id="joinPanel">
+        <div>
+          <p class="eyebrow">12 Player Online Racing</p>
+          <h1>Cartacing</h1>
+          <form id="joinForm" class="join-form">
+            <label for="nickname">Nickname</label>
+            <div class="join-row">
+              <input id="nickname" name="nickname" maxlength="18" autocomplete="nickname" placeholder="Driver" />
+              <button type="submit">Join</button>
+            </div>
+          </form>
+          <p class="status" id="connectionStatus">Connecting...</p>
+        </div>
+      </section>
+
+      <section class="hud" aria-live="polite">
+        <div>
+          <span>POS</span>
+          <strong id="position">--</strong>
+        </div>
+        <div>
+          <span>LAP</span>
+          <strong id="lap">--</strong>
+        </div>
+        <div>
+          <span>SPD</span>
+          <strong id="speed">0</strong>
+        </div>
+        <div>
+          <span>PLAYERS</span>
+          <strong id="players">0/12</strong>
+        </div>
+      </section>
+
+      <aside class="leaderboard">
+        <div class="leaderboard-header">
+          <span>Rank</span>
+          <button id="resetButton" type="button">Reset</button>
+        </div>
+        <ol id="leaderboard"></ol>
+      </aside>
+
+      <section class="results hidden" id="resultsPanel">
+        <div class="results-box">
+          <h2>Race Results</h2>
+          <ol id="results"></ol>
+          <button id="raceAgainButton" type="button">Race Again</button>
+        </div>
+      </section>
+    </main>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script type="module" src="/client.js"></script>
+  </body>
+</html>
