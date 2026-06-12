@@ -525,9 +525,36 @@ function constrainToTrack(car, circuit) {
   const nearest = findNearestTrackPosition(circuit, car.x, car.y);
   const maxDistance = circuit.width / 2 - CAR_RADIUS + 24;
   if (nearest.distance <= maxDistance) return;
-  car.x = car.previousX;
-  car.y = car.previousY;
-  car.speed *= 0.38;
+
+  let normalX = car.x - nearest.x;
+  let normalY = car.y - nearest.y;
+  const normalLength = Math.hypot(normalX, normalY) || 1;
+  normalX /= normalLength;
+  normalY /= normalLength;
+
+  car.x = nearest.x + normalX * maxDistance;
+  car.y = nearest.y + normalY * maxDistance;
+
+  const velocityX = Math.cos(car.angle) * car.speed;
+  const velocityY = Math.sin(car.angle) * car.speed;
+  const outwardSpeed = velocityX * normalX + velocityY * normalY;
+  const impact = clamp(Math.abs(outwardSpeed) / Math.max(1, Math.abs(car.speed)), 0, 1);
+  const damping = 0.78 - impact * 0.33;
+
+  let bouncedX = velocityX;
+  let bouncedY = velocityY;
+  if (outwardSpeed > 0) {
+    bouncedX = velocityX - 2 * outwardSpeed * normalX;
+    bouncedY = velocityY - 2 * outwardSpeed * normalY;
+  }
+
+  const bouncedSpeed = Math.hypot(bouncedX, bouncedY);
+  if (bouncedSpeed > 1) {
+    car.angle = Math.atan2(bouncedY, bouncedX);
+    car.speed = bouncedSpeed * damping;
+  } else {
+    car.speed *= 0.45;
+  }
 }
 
 function updateProgress(car, state) {
@@ -615,7 +642,9 @@ function findNearestTrackPosition(circuit, x, y) {
     const start = circuit.points[i];
     const end = circuit.points[(i + 1) % circuit.points.length];
     const projection = projectPointToSegment(x, y, start, end);
-    if (projection.distance < best.distance) best = { distance: projection.distance, position: i + projection.t };
+    if (projection.distance < best.distance) {
+      best = { distance: projection.distance, position: i + projection.t, x: projection.x, y: projection.y };
+    }
   }
   return best;
 }
@@ -627,7 +656,7 @@ function projectPointToSegment(x, y, start, end) {
   const t = clamp(((x - start.x) * dx + (y - start.y) * dy) / lengthSquared, 0, 1);
   const px = start.x + dx * t;
   const py = start.y + dy * t;
-  return { t, distance: Math.hypot(x - px, y - py) };
+  return { t, x: px, y: py, distance: Math.hypot(x - px, y - py) };
 }
 
 function serializeCircuit(circuit) {

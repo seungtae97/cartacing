@@ -244,25 +244,52 @@ test("colliding cars are separated and slowed down", () => {
   assert.ok(b.speed < 200);
 });
 
-test("hitting a track wall slows the car without forcing a right turn", () => {
+test("hitting a track wall bounces the car inward with speed loss", () => {
   const state = createInitialState({ circuitId: "monza" });
   const car = addHumanPlayer(state, "socket-a", "민수").car;
   setPlayerReady(state, "socket-a", true);
   startRace(state, "socket-a");
   updateGame(state, 4000);
 
-  const angleBefore = car.angle;
-  car.previousX = car.x;
-  car.previousY = car.y;
+  const index = 1;
+  const point = state.circuit.points[index];
+  const next = state.circuit.points[(index + 1) % state.circuit.points.length];
+  const normalAngle = Math.atan2(next.y - point.y, next.x - point.x) + Math.PI / 2;
+  const normalX = -Math.cos(normalAngle);
+  const normalY = -Math.sin(normalAngle);
+  const maxDistance = state.circuit.width / 2 - 18 + 24;
+
+  car.x = point.x + normalX * (maxDistance + 60);
+  car.y = point.y + normalY * (maxDistance + 60);
+  car.angle = normalAngle + Math.PI;
   car.speed = 240;
-  car.x = 20;
-  car.y = 20;
 
   updateGame(state, 16);
 
-  assert.equal(car.angle, angleBefore);
-  assert.ok(car.speed < 240);
+  const nearestAfterBounce = nearestTrackInfo(state.circuit, car.x, car.y);
+  const bounceNormalX = (car.x - nearestAfterBounce.x) / nearestAfterBounce.distance;
+  const bounceNormalY = (car.y - nearestAfterBounce.y) / nearestAfterBounce.distance;
+  const velocityDotNormal =
+    Math.cos(car.angle) * car.speed * bounceNormalX + Math.sin(car.angle) * car.speed * bounceNormalY;
+
+  assert.ok(nearestAfterBounce.distance <= maxDistance + 1);
+  assert.ok(velocityDotNormal < 0);
+  assert.ok(car.speed < 160);
 });
+
+function nearestTrackInfo(circuit, x, y) {
+  return circuit.points.reduce((best, point, index) => {
+    const next = circuit.points[(index + 1) % circuit.points.length];
+    const dx = next.x - point.x;
+    const dy = next.y - point.y;
+    const lengthSquared = dx * dx + dy * dy || 1;
+    const t = Math.max(0, Math.min(1, ((x - point.x) * dx + (y - point.y) * dy) / lengthSquared));
+    const px = point.x + dx * t;
+    const py = point.y + dy * t;
+    const distance = Math.hypot(x - px, y - py);
+    return distance < best.distance ? { distance, x: px, y: py } : best;
+  }, { distance: Number.POSITIVE_INFINITY, x: 0, y: 0 });
+}
 
 test("rankCars sorts by finish, lap, checkpoint, and progress", () => {
   const state = createInitialState();
