@@ -22,6 +22,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const publicDir = path.join(__dirname, "..", "public");
 const port = Number(process.env.PORT || 3000);
+const host = process.env.HOST || "0.0.0.0";
 
 const app = express();
 const httpServer = createServer(app);
@@ -154,8 +155,8 @@ setInterval(() => {
   }
 }, 1000 / TICK_RATE);
 
-httpServer.listen(port, () => {
-  console.log(`Cartacing 서버 실행 중: http://localhost:${port}`);
+httpServer.listen(port, host, () => {
+  console.log(`Cartacing 서버 실행 중: http://${host}:${port}`);
 });
 
 function joinStateRoom(socket, state, nickname) {
